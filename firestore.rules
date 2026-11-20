@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable hardened primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isEmailVerified() && request.auth.uid == userId;
+    }
+
+    function isValidHttpsUrl(url, minLen, maxLen) {
+      return url is string
+        && url.size() >= minLen
+        && url.size() <= maxLen
+        && url.matches('^https://[^\\s]+$');
+    }
+
+    // Entity validation blueprint: CatalogPreferences
+    function isValidCatalogPreferences(data, userId) {
+      return data.keys().hasAll(['ownerId', 'hiddenBuiltinKeys', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'hiddenBuiltinKeys', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.hiddenBuiltinKeys is list
+        && data.hiddenBuiltinKeys.size() <= 50
+        && (
+          data.hiddenBuiltinKeys.size() == 0
+          || (
+            data.hiddenBuiltinKeys[0] is string
+            && data.hiddenBuiltinKeys[0].size() >= 1
+            && data.hiddenBuiltinKeys[0].size() <= 200
+          )
+        )
+        && data.updatedAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // Entity validation blueprint: CloudPublication
+    function isValidCloudPublication(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'titulo', 'categoria', 'fecha',
+          'descripcion', 'rutaPdf', 'rutaPortada', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'titulo', 'categoria', 'fecha',
+          'descripcion', 'rutaPdf', 'rutaPortada', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.titulo is string
+        && data.titulo.size() >= 1
+        && data.titulo.size() <= 140
+        && data.categoria is string
+        && data.categoria.size() >= 1
+        && data.categoria.size() <= 40
+        && data.fecha is string
+        && data.fecha.size() >= 1
+        && data.fecha.size() <= 40
+        && data.descripcion is string
+        && data.descripcion.size() <= 400
+        && isValidHttpsUrl(data.rutaPdf, 8, 500)
+        && data.rutaPortada is string
+        && data.rutaPortada.size() <= 500
+        && (data.rutaPortada.size() == 0 || isValidHttpsUrl(data.rutaPortada, 8, 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // Entity validation blueprint: UserPrivateProfile (PII isolated)
+    function isValidUserPrivateProfile(data, userId) {
+      return data.keys().hasAll(['ownerId', 'email', 'displayName', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'email', 'displayName', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && isValidId(data.ownerId)
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 160
+        && data.displayName is string
+        && data.displayName.size() <= 100
+        && data.updatedAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // Per-user catalog preferences (hidden built-in publications sync)
+    match /users/{userId}/preferences/{prefId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(prefId) && prefId == 'catalog';
+      allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(prefId)
+        && prefId == 'catalog'
+        && isValidCatalogPreferences(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(prefId)
+        && prefId == 'catalog'
+        && isValidCatalogPreferences(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['hiddenBuiltinKeys', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(prefId) && prefId == 'catalog';
+    }
+
+    // Per-user cloud publications (only verified owner can read, create, update, or delete)
+    match /users/{userId}/publications/{publicationId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(publicationId);
+      allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(publicationId)
+        && isValidCloudPublication(incoming(), userId)
+        && incoming().createdAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(publicationId)
+        && isValidCloudPublication(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'titulo', 'categoria', 'fecha', 'descripcion', 'rutaPdf', 'rutaPortada', 'updatedAt'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(publicationId);
+    }
+
+    // Isolated PII private profile
+    match /users/{userId}/private/{docId} {
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(docId) && docId == 'profile';
+      allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(docId)
+        && docId == 'profile'
+        && isValidUserPrivateProfile(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidId(docId)
+        && docId == 'profile'
+        && isValidUserPrivateProfile(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(docId) && docId == 'profile';
+    }
+  }
+}

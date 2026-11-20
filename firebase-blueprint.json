@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "CatalogPreferences": {
+      "title": "CatalogPreferences",
+      "description": "Individual user preferences tracking hidden built-in catalog items across sessions.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user owning this preference document.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "hiddenBuiltinKeys": {
+          "type": "array",
+          "description": "Bounded list of built-in publication keys hidden by this user."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last preference update."
+        }
+      },
+      "required": ["ownerId", "hiddenBuiltinKeys", "updatedAt"]
+    },
+    "CloudPublication": {
+      "title": "CloudPublication",
+      "description": "A user-owned publication entry linked via HTTPS PDF URL and synchronized in Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner who created and can delete this publication.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "titulo": {
+          "type": "string",
+          "description": "Publication title.",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "categoria": {
+          "type": "string",
+          "description": "Publication category label.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "fecha": {
+          "type": "string",
+          "description": "Formatted publication date string.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "descripcion": {
+          "type": "string",
+          "description": "Short editorial synopsis.",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "rutaPdf": {
+          "type": "string",
+          "description": "Public HTTPS URL pointing to the PDF file.",
+          "minLength": 8,
+          "maxLength": 500,
+          "pattern": "^https://[^\\s]+$"
+        },
+        "rutaPortada": {
+          "type": "string",
+          "description": "Optional HTTPS URL pointing to a cover image.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "ownerId",
+        "titulo",
+        "categoria",
+        "fecha",
+        "descripcion",
+        "rutaPdf",
+        "rutaPortada",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Isolated private PII profile document strictly readable and writable only by the owner.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the document parent userId.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified user email address.",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown in the signed-in account header.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of profile sync."
+        }
+      },
+      "required": ["ownerId", "email", "displayName", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/preferences/{prefId}": {
+      "schema": {
+        "$ref": "#/entities/CatalogPreferences"
+      },
+      "description": "Stores per-user catalog preferences (e.g., hidden built-in publication keys)."
+    },
+    "/users/{userId}/publications/{publicationId}": {
+      "schema": {
+        "$ref": "#/entities/CloudPublication"
+      },
+      "description": "Stores personal cloud publications owned and deletable exclusively by the authenticated user."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": {
+        "$ref": "#/entities/UserPrivateProfile"
+      },
+      "description": "PII-isolated private profile document accessible strictly by the verified owner."
+    }
+  }
+}
