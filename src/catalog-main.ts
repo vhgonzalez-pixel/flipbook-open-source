@@ -1,6 +1,7 @@
 import type { User } from 'firebase/auth';
 import {
   addCloudPublication,
+  auth,
   BLUEPRINT_LIMITS,
   type CloudPublicationItem,
   deleteCloudPublication,
@@ -144,7 +145,7 @@ const LOCAL_CATEGORY_LABEL = 'Mis PDFs';
 let localPublications: LocalPublication[] = [];
 let cloudPublications: CloudPublicationItem[] = [];
 let cloudHiddenKeys: string[] | null = null;
-let currentUser: User | null = null;
+let currentUser: User | null = auth.currentUser || null;
 let unsubscribeUserCatalog: (() => void) | null = null;
 let isDeleteModeUnlocked = false;
 let pendingUnlockAfterAuth = false;
@@ -1121,8 +1122,12 @@ try {
   // Ignorar
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  void handleRedirectResult();
+window.addEventListener('DOMContentLoaded', async () => {
+  const redirectedUser = await handleRedirectResult();
+  if (redirectedUser) {
+    currentUser = redirectedUser;
+    updateAuthAndModeUi();
+  }
   void syncCatalogWithIndexedDB();
 });
 

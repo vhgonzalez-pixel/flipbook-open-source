@@ -26,6 +26,8 @@ import {
   OperationType,
 } from './firebase';
 
+export { auth };
+
 export const BLUEPRINT_LIMITS = {
   idPattern: /^[a-zA-Z0-9_-]+$/,
   httpsUrlPattern: /^https:\/\/[^\s]+$/,
