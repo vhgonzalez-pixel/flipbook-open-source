@@ -1,6 +1,8 @@
 import {
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type Unsubscribe,
   type User,
@@ -75,6 +77,20 @@ export function subscribeToAuth(callback: (user: User | null) => void): Unsubscr
   return onAuthStateChanged(auth, callback);
 }
 
+export async function handleRedirectResult(): Promise<User | null> {
+  if (!isFirebaseConfigured) return null;
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      await syncUserPrivateProfile(result.user);
+      return result.user;
+    }
+  } catch (error) {
+    console.error('Error handling auth redirect result:', error);
+  }
+  return null;
+}
+
 export async function signInIndividualUser(): Promise<User | null> {
   if (!isFirebaseConfigured) {
     throw new Error('Firebase no está configurado en esta instancia.');
@@ -85,10 +101,33 @@ export async function signInIndividualUser(): Promise<User | null> {
       await syncUserPrivateProfile(credential.user);
     }
     return credential.user;
-  } catch (error) {
-    const code = (error as { code?: string })?.code;
+  } catch (error: any) {
+    const code = error?.code;
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
       return null;
+    }
+    if (
+      code === 'auth/popup-blocked' ||
+      code === 'auth/unauthorized-domain' ||
+      code === 'auth/operation-not-allowed'
+    ) {
+      try {
+        await signInWithRedirect(auth, googleProvider);
+        return null;
+      } catch (redirectErr: any) {
+        const rCode = redirectErr?.code;
+        if (rCode === 'auth/unauthorized-domain') {
+          throw new Error(
+            'Dominio no autorizado en Firebase. Añade tu dominio de GitHub Pages en Firebase Console -> Authentication -> Settings -> Authorized domains.'
+          );
+        }
+        throw redirectErr;
+      }
+    }
+    if (code === 'auth/unauthorized-domain') {
+      throw new Error(
+        'Dominio no autorizado en Firebase. Añade tu dominio de GitHub Pages en Firebase Console -> Authentication -> Settings -> Authorized domains.'
+      );
     }
     throw error;
   }

@@ -4,6 +4,7 @@ import {
   BLUEPRINT_LIMITS,
   type CloudPublicationItem,
   deleteCloudPublication,
+  handleRedirectResult,
   isFirebaseReady,
   saveHiddenBuiltinKeysToCloud,
   signInIndividualUser,
@@ -1121,6 +1122,7 @@ try {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  void handleRedirectResult();
   void syncCatalogWithIndexedDB();
 });
 
