@@ -628,25 +628,49 @@
                 </button>
             </div>
             <p class="text-xs text-zinc-400 mb-4 leading-relaxed">
-                Comparte este enlace con tus lectores, amigos o clientes para que puedan abrir el visor interactivo al instante.
+                Comparte este enlace de solo lectura con tus lectores, clientes o en tu portafolio. Nadie podrá editar tus publicaciones.
             </p>
-            <div id="share-local-warning" class="hidden mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-2.5">
-                <p class="text-xs text-amber-200 leading-relaxed">
-                    Este PDF está guardado solo en tu navegador. Si envías un enlace local, otras personas no podrán abrirlo. Pega un enlace público del PDF (Google Drive, Dropbox, GitHub o web) o descarga el archivo para enviarlo.
+            <div id="share-readonly-badge" class="hidden mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200 leading-relaxed">
+                Enlace público de solo lectura listo. Quien lo abra solo podrá visualizar la publicación.
+            </div>
+            <div id="share-local-warning" class="hidden mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3.5 space-y-3">
+                <p id="share-local-desc" class="text-xs text-amber-100 leading-relaxed">
+                    Genera un enlace público de solo lectura para compartir esta publicación o ponerla en tu portafolio, sin que nadie pueda editar tu catálogo.
                 </p>
-                <div class="space-y-1.5">
-                    <label for="share-public-url-input" class="block text-[11px] font-semibold text-amber-300">
-                        Enlace público del PDF (HTTPS)
-                    </label>
-                    <input id="share-public-url-input" type="url" placeholder="https://.../mi-publicacion.pdf" class="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono">
-                    <p id="share-public-url-error" class="hidden text-[11px] text-red-400">
-                        Ingresa una URL válida que comience con https:// o http://
-                    </p>
+                <div id="share-publish-progress" class="hidden space-y-1.5">
+                    <div class="flex items-center justify-between text-[11px] text-amber-200">
+                        <span id="share-publish-status">Publicando enlace de lectura...</span>
+                        <span id="share-publish-pct" class="font-mono tabular-nums">0%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                        <div id="share-publish-bar" class="h-full bg-amber-500 rounded-full transition-all duration-200" style="width: 10%"></div>
+                    </div>
                 </div>
-                <button id="share-local-download-btn" type="button" class="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer">
-                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                    <span>Descargar PDF para enviar</span>
+                <p id="share-publish-error" class="hidden text-[11px] text-red-300 bg-red-950/60 border border-red-500/30 rounded-lg px-2.5 py-2 leading-relaxed"></p>
+                <button id="share-publish-btn" type="button" class="w-full px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                    <span id="share-publish-btn-label">Generar enlace público de lectura</span>
                 </button>
+                <details id="share-alt-options" class="pt-1 border-t border-amber-500/20 text-xs">
+                    <summary class="cursor-pointer text-[11px] text-amber-300/90 hover:text-amber-200 select-none">
+                        O usar un enlace HTTPS externo / descargar copia
+                    </summary>
+                    <div class="mt-2.5 space-y-2.5">
+                        <div class="space-y-1">
+                            <label for="share-public-url-input" class="block text-[11px] font-medium text-zinc-300">
+                                Enlace externo del PDF (Drive, Dropbox, GitHub)
+                            </label>
+                            <input id="share-public-url-input" type="url" placeholder="https://.../mi-publicacion.pdf" class="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono">
+                            <p id="share-public-url-error" class="hidden text-[11px] text-red-400">
+                                Ingresa una URL válida que comience con https:// o http://
+                            </p>
+                        </div>
+                        <button id="share-local-download-btn" type="button" class="w-full px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-[11px] font-medium transition flex items-center justify-center gap-1.5 cursor-pointer">
+                            <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            <span>Descargar copia PDF</span>
+                        </button>
+                    </div>
+                </details>
             </div>
             <div class="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-2 mb-4">
                 <input id="share-url-input" type="text" readonly aria-label="Enlace de la publicación" class="bg-transparent text-xs text-zinc-300 flex-1 px-2 outline-none font-mono">
@@ -711,6 +735,7 @@
         let activeDocTitle = DEFAULT_DOC_TITLE;
         let activeObjectUrl = null;
         let activeLocalId = null;
+        let activeShareId = null;
         let pageAspectRatio = 612 / 792;
         let currentIndex = 0;
         let totalPages = 0;
@@ -1046,7 +1071,8 @@
                     pageCount: matched?.pageCount ?? null,
                     coverDataUrl: matched?.coverDataUrl ?? null,
                     pdfData,
-                    addedAt: now
+                    addedAt: now,
+                    sharedId: matched?.sharedId ?? null
                 };
 
                 const db = await openLocalLibraryDb();
@@ -1100,6 +1126,7 @@
                             ...current,
                             pageCount: nextPageCount,
                             coverDataUrl: patch.coverDataUrl !== undefined ? patch.coverDataUrl : current.coverDataUrl,
+                            sharedId: patch.sharedId !== undefined ? patch.sharedId : (current.sharedId ?? null),
                             descripcion: buildLocalDescription(nextPageCount, current.fileSize)
                         };
                         const putReq = store.put(updated);
@@ -2395,6 +2422,7 @@
             activeDocUrl = url;
             activeDocTitle = filename;
             activeLocalId = options.localId || null;
+            activeShareId = options.shareId || null;
             resetSearchState();
             loadBookmarksFromStorage();
 
@@ -2819,7 +2847,15 @@
         menuPrintBtn.addEventListener('click', () => printActivePdf());
 
         const shareModal = document.getElementById('share-modal');
+        const shareReadonlyBadge = document.getElementById('share-readonly-badge');
         const shareLocalWarning = document.getElementById('share-local-warning');
+        const sharePublishProgress = document.getElementById('share-publish-progress');
+        const sharePublishStatus = document.getElementById('share-publish-status');
+        const sharePublishPct = document.getElementById('share-publish-pct');
+        const sharePublishBar = document.getElementById('share-publish-bar');
+        const sharePublishError = document.getElementById('share-publish-error');
+        const sharePublishBtn = document.getElementById('share-publish-btn');
+        const sharePublishBtnLabel = document.getElementById('share-publish-btn-label');
         const sharePublicUrlInput = document.getElementById('share-public-url-input');
         const sharePublicUrlError = document.getElementById('share-public-url-error');
         const shareLocalDownloadBtn = document.getElementById('share-local-download-btn');
@@ -2833,8 +2869,32 @@
         const shareModalCloseBtn = document.getElementById('share-modal-close-btn');
         const menuShareBtn = document.getElementById('menu-share-btn');
         let currentShareUrl = '';
+        let isPublishingCloudShare = false;
+
+        function parseShareQueryParam(search) {
+            const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+            const raw = (params.get('share') || '').trim();
+            return /^[a-zA-Z0-9_-]{1,128}$/.test(raw) ? raw : null;
+        }
+
+        function waitForCloudShareBridge() {
+            if (window.__flipbookCloudShare) {
+                return Promise.resolve(window.__flipbookCloudShare);
+            }
+            return new Promise((resolve) => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    resolve(window.__flipbookCloudShare || null);
+                };
+                window.addEventListener('flipbook-cloud-bridge-ready', finish, { once: true });
+                setTimeout(finish, 6000);
+            });
+        }
 
         function isViewingLocalPdf() {
+            if (activeShareId) return false;
             return Boolean(activeLocalId) ||
                 (typeof activeDocUrl === 'string' && activeDocUrl.startsWith('blob:')) ||
                 Boolean(parseLocalQueryParam(window.location.search));
@@ -2843,8 +2903,15 @@
         function buildCanonicalShareUrl(overridePublicUrl = '') {
             const currentTitle = (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación Editorial';
             const trimmedOverride = String(overridePublicUrl || '').trim();
-            const isLocalOnly = isViewingLocalPdf();
 
+            if (activeShareId) {
+                const shareUrl = new URL(window.location.pathname, window.location.origin);
+                shareUrl.search = '';
+                shareUrl.searchParams.set('share', activeShareId);
+                return { url: shareUrl.toString(), isLocalOnly: false, hasInvalidOverride: false };
+            }
+
+            const isLocalOnly = isViewingLocalPdf();
             if (isLocalOnly) {
                 if (!trimmedOverride) {
                     return { url: '', isLocalOnly: true, hasInvalidOverride: false };
@@ -2855,6 +2922,7 @@
                 try {
                     const parsed = new URL(trimmedOverride);
                     const shareUrl = new URL(window.location.pathname, window.location.origin);
+                    shareUrl.search = '';
                     shareUrl.searchParams.set('doc', parsed.toString());
                     shareUrl.searchParams.set('title', currentTitle);
                     return { url: shareUrl.toString(), isLocalOnly: true, hasInvalidOverride: false };
@@ -2865,9 +2933,25 @@
 
             const sourceDocUrl = (activeDocUrl && !activeDocUrl.startsWith('blob:')) ? activeDocUrl : DEFAULT_PDF_URL;
             const shareUrl = new URL(window.location.pathname, window.location.origin);
+            shareUrl.search = '';
             shareUrl.searchParams.set('doc', sourceDocUrl);
             shareUrl.searchParams.set('title', currentTitle);
             return { url: shareUrl.toString(), isLocalOnly: false, hasInvalidOverride: false };
+        }
+
+        function updateSharePublishButtonLabel() {
+            if (!sharePublishBtnLabel || !sharePublishBtn) return;
+            const bridge = window.__flipbookCloudShare;
+            const user = bridge ? bridge.getCurrentUser() : null;
+            if (isPublishingCloudShare) {
+                sharePublishBtn.disabled = true;
+                sharePublishBtnLabel.textContent = 'Generando enlace...';
+                return;
+            }
+            sharePublishBtn.disabled = false;
+            sharePublishBtnLabel.textContent = user
+                ? 'Generar enlace público de lectura'
+                : 'Conectar con Google y generar enlace';
         }
 
         function syncShareModalState() {
@@ -2877,6 +2961,9 @@
             currentShareUrl = shareState.url;
             const hasShareableUrl = Boolean(currentShareUrl);
 
+            if (shareReadonlyBadge) {
+                shareReadonlyBadge.classList.toggle('hidden', !hasShareableUrl);
+            }
             if (shareLocalWarning) {
                 shareLocalWarning.classList.toggle('hidden', !shareState.isLocalOnly);
             }
@@ -2886,12 +2973,13 @@
             if (shareUrlInput) {
                 shareUrlInput.value = currentShareUrl;
                 shareUrlInput.placeholder = shareState.isLocalOnly
-                    ? 'Pega arriba un enlace HTTPS para generar el link compartible'
+                    ? 'Genera el enlace arriba para copiarlo'
                     : '';
             }
             if (shareCopyBtn) {
                 shareCopyBtn.disabled = !hasShareableUrl;
             }
+            updateSharePublishButtonLabel();
 
             const setSocialLinkState = (el, href) => {
                 if (!el) return;
@@ -2928,20 +3016,137 @@
             }
         }
 
-        function openShareModal() {
+        async function getActivePdfBytesForShare() {
+            if (pdfDoc && typeof pdfDoc.getData === 'function') {
+                const raw = await pdfDoc.getData();
+                return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+            }
+            if (activeLocalId) {
+                const rec = await getLocalPublicationById(activeLocalId);
+                if (rec && rec.pdfData) {
+                    return rec.pdfData instanceof ArrayBuffer
+                        ? new Uint8Array(rec.pdfData)
+                        : new Uint8Array(await createPdfBlobFromRecord(rec).arrayBuffer());
+                }
+            }
+            if (activeDocUrl) {
+                const resp = await fetch(activeDocUrl);
+                const ab = await resp.arrayBuffer();
+                return new Uint8Array(ab);
+            }
+            throw new Error('No se encontraron los bytes del documento PDF.');
+        }
+
+        async function publishCurrentLocalPdfToShare() {
+            if (isPublishingCloudShare || activeShareId) return;
+            const bridge = await waitForCloudShareBridge();
+            if (!bridge || !bridge.isReady()) {
+                if (sharePublishError) {
+                    sharePublishError.textContent = 'El servicio de Firebase no está disponible en este entorno.';
+                    sharePublishError.classList.remove('hidden');
+                }
+                return;
+            }
+
+            if (sharePublishError) {
+                sharePublishError.classList.add('hidden');
+                sharePublishError.textContent = '';
+            }
+
+            try {
+                let user = bridge.getCurrentUser();
+                if (!user) {
+                    user = await bridge.signIn();
+                    if (!user) {
+                        return;
+                    }
+                }
+
+                isPublishingCloudShare = true;
+                updateSharePublishButtonLabel();
+                if (sharePublishProgress) sharePublishProgress.classList.remove('hidden');
+                if (sharePublishStatus) sharePublishStatus.textContent = 'Preparando documento...';
+                if (sharePublishPct) sharePublishPct.textContent = '5%';
+                if (sharePublishBar) sharePublishBar.style.width = '5%';
+
+                const bytes = await getActivePdfBytesForShare();
+                const currentTitle = (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación PDF';
+                const nextShareId = await bridge.publishPdfBytes({
+                    titulo: currentTitle,
+                    bytes,
+                    onProgress: (done, total) => {
+                        const pct = Math.max(8, Math.min(100, Math.round((done / Math.max(1, total)) * 100)));
+                        if (sharePublishStatus) {
+                            sharePublishStatus.textContent = `Publicando enlace de lectura (${done}/${total})...`;
+                        }
+                        if (sharePublishPct) sharePublishPct.textContent = `${pct}%`;
+                        if (sharePublishBar) sharePublishBar.style.width = `${pct}%`;
+                    }
+                });
+
+                activeShareId = nextShareId;
+                if (activeLocalId) {
+                    await updateLocalPdfMetadata(activeLocalId, { sharedId: nextShareId });
+                }
+                if (sharePublishProgress) sharePublishProgress.classList.add('hidden');
+                syncShareModalState();
+            } catch (err) {
+                if (sharePublishProgress) sharePublishProgress.classList.add('hidden');
+                if (sharePublishError) {
+                    sharePublishError.textContent = err instanceof Error && err.message
+                        ? err.message
+                        : 'No se pudo generar el enlace público. Verifica tu sesión e intenta nuevamente.';
+                    sharePublishError.classList.remove('hidden');
+                }
+            } finally {
+                isPublishingCloudShare = false;
+                updateSharePublishButtonLabel();
+            }
+        }
+
+        async function openShareModal() {
             toggleMoreActionsMenu(false);
             if (sharePublicUrlInput) {
                 sharePublicUrlInput.value = '';
             }
+            if (sharePublishError) {
+                sharePublishError.classList.add('hidden');
+                sharePublishError.textContent = '';
+            }
+            if (sharePublishProgress) {
+                sharePublishProgress.classList.add('hidden');
+            }
+
+            const bridge = await waitForCloudShareBridge();
+            if (!activeShareId && activeLocalId) {
+                const localRec = await getLocalPublicationById(activeLocalId);
+                if (localRec && localRec.sharedId) {
+                    const stillExists = bridge ? await bridge.verifyShareExists(localRec.sharedId) : true;
+                    if (stillExists) {
+                        activeShareId = localRec.sharedId;
+                    } else {
+                        await updateLocalPdfMetadata(activeLocalId, { sharedId: null });
+                    }
+                }
+            }
+
             syncShareModalState();
             if (shareModal) shareModal.classList.remove('hidden');
+
+            // Si ya inició sesión con Google, generar automáticamente el enlace de lectura al abrir Compartir
+            if (!activeShareId && isViewingLocalPdf() && bridge && bridge.getCurrentUser()) {
+                void publishCurrentLocalPdfToShare();
+            }
         }
 
         function closeShareModal() {
             if (shareModal) shareModal.classList.add('hidden');
         }
 
-        if (menuShareBtn) menuShareBtn.addEventListener('click', () => openShareModal());
+        if (menuShareBtn) menuShareBtn.addEventListener('click', () => { void openShareModal(); });
+        if (sharePublishBtn) {
+            sharePublishBtn.addEventListener('click', () => { void publishCurrentLocalPdfToShare(); });
+        }
         if (sharePublicUrlInput) {
             sharePublicUrlInput.addEventListener('input', () => syncShareModalState());
         }
@@ -3164,8 +3369,10 @@
                 }
                 activeObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
                 const nextLocalId = saved ? saved.id : null;
+                const nextShareId = saved && saved.sharedId ? saved.sharedId : null;
                 const params = new URLSearchParams(window.location.search);
                 params.delete('doc');
+                params.delete('share');
                 params.set('title', file.name);
                 if (nextLocalId) {
                     params.set('local', nextLocalId);
@@ -3173,7 +3380,7 @@
                     params.delete('local');
                 }
                 window.history.replaceState(null, '', `?${params.toString()}`);
-                await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: nextLocalId });
+                await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: nextLocalId, shareId: nextShareId });
             } catch (err) {
                 console.error('Error guardando PDF local en biblioteca:', err);
                 if (activeObjectUrl) {
@@ -3182,10 +3389,11 @@
                 activeObjectUrl = URL.createObjectURL(file);
                 const params = new URLSearchParams(window.location.search);
                 params.delete('doc');
+                params.delete('share');
                 params.delete('local');
                 params.set('title', file.name);
                 window.history.replaceState(null, '', `?${params.toString()}`);
-                await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: null });
+                await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: null, shareId: null });
             } finally {
                 input.value = '';
             }
@@ -3201,11 +3409,12 @@
         retryBtn.addEventListener('click', () => {
             const queryInfo = parseDocQueryParam(window.location.search);
             const requestedLocalId = parseLocalQueryParam(window.location.search);
-            if (queryInfo.isInvalidScheme || (requestedLocalId && (!activeDocUrl || !activeDocUrl.startsWith('blob:')))) {
+            const requestedShareId = parseShareQueryParam(window.location.search);
+            if (requestedShareId || queryInfo.isInvalidScheme || (requestedLocalId && (!activeDocUrl || !activeDocUrl.startsWith('blob:')))) {
                 void bootstrapViewer();
                 return;
             }
-            void loadPDFAndInitFlipbook(activeDocUrl, activeDocTitle, { localId: activeLocalId });
+            void loadPDFAndInitFlipbook(activeDocUrl, activeDocTitle, { localId: activeLocalId, shareId: activeShareId });
         });
 
         demoFallbackBtn.addEventListener('click', () => {
@@ -3215,7 +3424,7 @@
                 // Ignorar
             }
             window.history.replaceState(null, '', window.location.pathname);
-            void loadPDFAndInitFlipbook(DEFAULT_PDF_URL, DEFAULT_DOC_TITLE, { localId: null });
+            void loadPDFAndInitFlipbook(DEFAULT_PDF_URL, DEFAULT_DOC_TITLE, { localId: null, shareId: null });
         });
 
         let resizeTimeout = null;
@@ -3238,8 +3447,59 @@
         updateViewModeUI();
         applyZoomAndPan();
 
-        // Inicialización automática mediante parámetro ?doc=, ?local= o último PDF local guardado
+        // Inicialización automática mediante parámetro ?share=, ?doc=, ?local= o último PDF local guardado
         async function bootstrapViewer() {
+            const bridgePromise = waitForCloudShareBridge();
+            void bridgePromise.then((bridge) => {
+                if (bridge) {
+                    void bridge.handleRedirectResult();
+                    bridge.subscribeAuth(() => updateSharePublishButtonLabel());
+                }
+            });
+
+            const requestedShareId = parseShareQueryParam(window.location.search);
+            if (requestedShareId) {
+                uploadLabel.classList.add('hidden');
+                uploadDivider.classList.add('hidden');
+                activeShareId = requestedShareId;
+                showLoader('Publicación compartida', 'Cargando publicación de solo lectura...');
+                try {
+                    const bridge = await bridgePromise;
+                    if (!bridge || !bridge.isReady()) {
+                        throw new Error('No se pudo conectar con Firebase para cargar esta publicación.');
+                    }
+                    const loaded = await bridge.loadSharedPublication(requestedShareId, (done, total) => {
+                        const pct = 8 + (done / Math.max(1, total)) * 52;
+                        setLoaderProgress(pct, 'Publicación compartida', `Descargando publicación (${done}/${total})...`);
+                    });
+                    if (loaded.kind === 'url') {
+                        await loadPDFAndInitFlipbook(loaded.pdfUrl, loaded.titulo, {
+                            localId: null,
+                            shareId: requestedShareId
+                        });
+                    } else {
+                        if (activeObjectUrl) {
+                            URL.revokeObjectURL(activeObjectUrl);
+                        }
+                        activeObjectUrl = URL.createObjectURL(new Blob([loaded.bytes], { type: 'application/pdf' }));
+                        await loadPDFAndInitFlipbook(activeObjectUrl, loaded.titulo, {
+                            localId: null,
+                            shareId: requestedShareId
+                        });
+                    }
+                } catch (err) {
+                    console.error('Error cargando publicación compartida:', err);
+                    activeDocUrl = '';
+                    docTitleEl.textContent = 'Publicación no disponible';
+                    showError(
+                        err instanceof Error && err.message
+                            ? err.message
+                            : 'No se pudo abrir esta publicación compartida.'
+                    );
+                }
+                return;
+            }
+
             const queryInfo = parseDocQueryParam(window.location.search);
             if (queryInfo.hasDocParam) {
                 // Ocultar el botón de subida manual en cabecera cuando hay un ?doc= activo
@@ -3250,7 +3510,7 @@
                     docTitleEl.textContent = 'Enlace inválido';
                     showError('El parámetro ?doc= contiene una ruta o esquema no válido.');
                 } else {
-                    await loadPDFAndInitFlipbook(queryInfo.docUrl, queryInfo.displayTitle, { localId: null });
+                    await loadPDFAndInitFlipbook(queryInfo.docUrl, queryInfo.displayTitle, { localId: null, shareId: null });
                 }
                 return;
             }
@@ -3285,7 +3545,8 @@
                         window.history.replaceState(null, '', `?${params.toString()}`);
                     }
                     await loadPDFAndInitFlipbook(activeObjectUrl, localRecord.fileName, {
-                        localId: localRecord.id
+                        localId: localRecord.id,
+                        shareId: localRecord.sharedId || null
                     });
                     return;
                 }
@@ -3295,7 +3556,7 @@
                     activeDocUrl = '';
                     activeDocTitle = requestedTitle || 'Publicación local no disponible';
                     docTitleEl.textContent = activeDocTitle;
-                    showError('Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que comparta un enlace público (HTTPS) o te envíe el archivo PDF directamente.');
+                    showError('Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que genere el enlace público desde el botón Compartir.');
                     return;
                 }
 
@@ -3306,10 +3567,11 @@
                 }
             }
 
-            await loadPDFAndInitFlipbook(DEFAULT_PDF_URL, DEFAULT_DOC_TITLE, { localId: null });
+            await loadPDFAndInitFlipbook(DEFAULT_PDF_URL, DEFAULT_DOC_TITLE, { localId: null, shareId: null });
         }
 
         void bootstrapViewer();
     </script>
+    <script type="module" src="/src/visor-share-bridge.ts"></script>
 </body>
 </html>

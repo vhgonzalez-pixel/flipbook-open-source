@@ -457,6 +457,90 @@
         </form>
     </div>
 
+    <!-- MODAL PARA COMPARTIR PUBLICACIÓN EN MODO SOLO LECTURA -->
+    <div
+        id="catalog-share-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="catalog-share-title"
+        class="hidden fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-sm items-center justify-center p-4"
+    >
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-2">
+                <h3 id="catalog-share-title" class="text-base font-bold text-zinc-100 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+                    </svg>
+                    <span>Compartir Publicación</span>
+                </h3>
+                <button id="catalog-share-close-x" type="button" aria-label="Cerrar modal" class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <p id="catalog-share-item-title" class="text-xs font-semibold text-amber-400 truncate mb-2"></p>
+            <p class="text-xs text-zinc-400 mb-4 leading-relaxed">
+                Comparte este enlace de solo lectura en tu portafolio o con cualquier persona. Quien lo abra solo podrá leer la publicación, sin acceso a edición.
+            </p>
+
+            <div id="catalog-share-readonly-badge" class="hidden mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200 leading-relaxed">
+                Enlace público de solo lectura listo. Quien lo abra no podrá editar tu catálogo.
+            </div>
+
+            <div id="catalog-share-publish-box" class="hidden mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3.5 space-y-3">
+                <p class="text-xs text-amber-100 leading-relaxed">
+                    Este PDF está guardado localmente en tu navegador. Genera un enlace público de solo lectura para compartirlo directamente o integrarlo en tu portafolio.
+                </p>
+                <div id="catalog-share-progress" class="hidden space-y-1.5">
+                    <div class="flex items-center justify-between text-[11px] text-amber-200">
+                        <span id="catalog-share-status">Publicando enlace de lectura...</span>
+                        <span id="catalog-share-pct" class="font-mono tabular-nums">0%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                        <div id="catalog-share-bar" class="h-full bg-amber-500 rounded-full transition-all duration-200" style="width: 10%"></div>
+                    </div>
+                </div>
+                <p id="catalog-share-error" class="hidden text-[11px] text-red-300 bg-red-950/60 border border-red-500/30 rounded-lg px-2.5 py-2 leading-relaxed"></p>
+                <button id="catalog-share-publish-btn" type="button" class="w-full px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                    </svg>
+                    <span id="catalog-share-publish-btn-label">Generar enlace público de lectura</span>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-2 mb-4">
+                <input id="catalog-share-url-input" type="text" readonly aria-label="Enlace de solo lectura de la publicación" class="bg-transparent text-xs text-zinc-300 flex-1 px-2 outline-none font-mono">
+                <button id="catalog-share-copy-btn" type="button" class="bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+                    <span>Copiar</span>
+                </button>
+            </div>
+
+            <div class="space-y-2 mb-5">
+                <button id="catalog-share-native-btn" type="button" class="hidden w-full px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                    <span>Compartir mediante aplicaciones del dispositivo...</span>
+                </button>
+                <div class="grid grid-cols-3 gap-2">
+                    <a id="catalog-share-whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer" class="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5">
+                        <span class="text-emerald-400 font-bold">W</span> WhatsApp
+                    </a>
+                    <a id="catalog-share-twitter-btn" href="#" target="_blank" rel="noopener noreferrer" class="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5">
+                        <span class="text-sky-400 font-bold">X</span> Twitter
+                    </a>
+                    <a id="catalog-share-email-btn" href="#" class="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5">
+                        <span class="text-amber-400 font-bold">@</span> Correo
+                    </a>
+                </div>
+            </div>
+
+            <div class="flex justify-end">
+                <button id="catalog-share-close-btn" type="button" class="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition cursor-pointer">
+                    Cerrar
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- PIE DE PÁGINA -->
     <footer class="border-t border-zinc-800/80 bg-zinc-950">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-zinc-500">

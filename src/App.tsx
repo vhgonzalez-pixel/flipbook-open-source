@@ -72,6 +72,20 @@ import {
   saveLocalPdfToLibrary,
   updateLocalPdfMetadata,
 } from './utils/localPdfLibrary';
+import {
+  buildCanonicalShareLink,
+  loadSharedPublicationFromCloud,
+  parseShareQueryParam,
+  publishPdfBytesToCloudShare,
+  verifySharedPublicationExists,
+} from './shared-publications';
+import {
+  handleRedirectResult,
+  isFirebaseReady,
+  signInIndividualUser,
+  subscribeToAuth,
+} from './catalog-firebase';
+import type { User } from 'firebase/auth';
 
 declare global {
   interface Window {
@@ -115,23 +129,37 @@ export default function App() {
     };
   }, []);
 
+  const initialShareId = useMemo(
+    () =>
+      parseShareQueryParam(
+        typeof window !== 'undefined' ? window.location.search : ''
+      ),
+    []
+  );
+
   const [pdfUrl, setPdfUrl] = useState<string>(
     initialQuery.hasDocParam && initialQuery.docUrl
       ? initialQuery.docUrl
       : DEFAULT_PDF_URL
   );
   const [docTitle, setDocTitle] = useState<string>(
-    initialQuery.hasDocParam && initialQuery.displayTitle
-      ? initialQuery.displayTitle
-      : initialLocalQuery.requestedLocalId && initialLocalQuery.requestedTitle
-        ? initialLocalQuery.requestedTitle
-        : DEFAULT_DOC_TITLE
+    initialShareId
+      ? 'Cargando publicación compartida...'
+      : initialQuery.hasDocParam && initialQuery.displayTitle
+        ? initialQuery.displayTitle
+        : initialLocalQuery.requestedLocalId && initialLocalQuery.requestedTitle
+          ? initialLocalQuery.requestedTitle
+          : DEFAULT_DOC_TITLE
   );
-  const [hasUrlDocParam] = useState<boolean>(initialQuery.hasDocParam);
+  const [hasUrlDocParam] = useState<boolean>(
+    initialQuery.hasDocParam || Boolean(initialShareId)
+  );
+  const [activeShareId, setActiveShareId] = useState<string | null>(initialShareId);
   const [isLocalPdf, setIsLocalPdf] = useState<boolean>(
-    Boolean(!initialQuery.hasDocParam && initialLocalQuery.requestedLocalId)
+    Boolean(!initialShareId && !initialQuery.hasDocParam && initialLocalQuery.requestedLocalId)
   );
   const [isResolvingLocal, setIsResolvingLocal] = useState<boolean>(() => {
+    if (initialShareId) return true;
     if (initialQuery.hasDocParam) return false;
     if (initialLocalQuery.requestedLocalId) return true;
     try {
@@ -168,6 +196,10 @@ export default function App() {
   const [printPrepProgress, setPrintPrepProgress] = useState<string>('Generando páginas...');
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [sharePublicUrl, setSharePublicUrl] = useState<string>('');
+  const [isPublishingShare, setIsPublishingShare] = useState<boolean>(false);
+  const [sharePublishProgress, setSharePublishProgress] = useState<{ pct: number; label: string } | null>(null);
+  const [sharePublishError, setSharePublishError] = useState<string | null>(null);
+  const [signedInUser, setSignedInUser] = useState<User | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -509,8 +541,63 @@ export default function App() {
     [stageSize.stageWidth, stageSize.stageHeight, containerSize.width, containerSize.height]
   );
 
-  // Restaurar publicación local desde ?local= o último PDF local activo si no hay ?doc=
   useEffect(() => {
+    void handleRedirectResult();
+    return subscribeToAuth((user) => {
+      setSignedInUser(user);
+    });
+  }, []);
+
+  // Restaurar publicación desde ?share=, ?local= o último PDF local activo si no hay ?doc=
+  useEffect(() => {
+    if (initialShareId) {
+      let cancelled = false;
+      void (async () => {
+        try {
+          setLoadingMessage('Cargando publicación compartida de solo lectura...');
+          setLoadingPercent(8);
+          const loaded = await loadSharedPublicationFromCloud(initialShareId, (done, total) => {
+            if (cancelled) return;
+            const pct = Math.round(8 + (done / Math.max(1, total)) * 52);
+            setLoadingPercent(pct);
+            setLoadingMessage(`Descargando publicación (${done}/${total})...`);
+          });
+          if (cancelled) return;
+          setActiveShareId(initialShareId);
+          setIsLocalPdf(false);
+          setIsLocalMissingError(false);
+          setDocTitle(loaded.titulo);
+          if (loaded.kind === 'url') {
+            setPdfUrl(loaded.pdfUrl);
+          } else {
+            if (objectUrlRef.current) {
+              URL.revokeObjectURL(objectUrlRef.current);
+            }
+            const nextUrl = URL.createObjectURL(
+              new Blob([loaded.bytes.slice()], { type: 'application/pdf' })
+            );
+            objectUrlRef.current = nextUrl;
+            setPdfUrl(nextUrl);
+          }
+          setIsResolvingLocal(false);
+        } catch (err) {
+          if (cancelled) return;
+          setIsLocalMissingError(true);
+          setDocTitle('Publicación no disponible');
+          setErrorMessage(
+            err instanceof Error && err.message
+              ? err.message
+              : 'No se pudo abrir esta publicación compartida.'
+          );
+          setIsLoading(false);
+          setIsResolvingLocal(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (initialQuery.hasDocParam) {
       setIsResolvingLocal(false);
       return;
@@ -540,7 +627,7 @@ export default function App() {
           setIsLocalMissingError(true);
           setDocTitle(initialLocalQuery.requestedTitle || 'Publicación local no disponible');
           setErrorMessage(
-            'Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que comparta un enlace público (HTTPS) o te envíe el archivo PDF directamente.'
+            'Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que genere el enlace público desde el botón Compartir.'
           );
           setIsLoading(false);
           setIsResolvingLocal(false);
@@ -562,6 +649,7 @@ export default function App() {
       const nextUrl = URL.createObjectURL(blob);
       objectUrlRef.current = nextUrl;
       activeLocalIdRef.current = record.id;
+      setActiveShareId(record.sharedId || null);
       try {
         localStorage.setItem(ACTIVE_LOCAL_ID_STORAGE_KEY, record.id);
       } catch {
@@ -583,7 +671,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [initialQuery.hasDocParam, initialLocalQuery.requestedLocalId, initialLocalQuery.requestedTitle]);
+  }, [initialShareId, initialQuery.hasDocParam, initialLocalQuery.requestedLocalId, initialLocalQuery.requestedTitle]);
 
   // Cargar PDF con barra de progreso real y renderizado perezoso prioritario
   useEffect(() => {
@@ -1258,6 +1346,95 @@ export default function App() {
     printActivePdf,
   ]);
 
+  const publishCurrentPdfToShare = useCallback(async () => {
+    if (isPublishingShare || activeShareId) return;
+    if (!isFirebaseReady()) {
+      setSharePublishError('El servicio de Firebase no está disponible en este entorno.');
+      return;
+    }
+    setSharePublishError(null);
+    try {
+      let user = signedInUser;
+      if (!user) {
+        user = await signInIndividualUser();
+        if (!user) return;
+        setSignedInUser(user);
+      }
+
+      setIsPublishingShare(true);
+      setSharePublishProgress({ pct: 5, label: 'Preparando documento...' });
+
+      let bytes: Uint8Array | null = null;
+      if (pdfDocRef.current && typeof pdfDocRef.current.getData === 'function') {
+        const raw = await pdfDocRef.current.getData();
+        bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      } else if (activeLocalIdRef.current) {
+        const rec = await getLocalPublicationById(activeLocalIdRef.current);
+        if (rec?.pdfData) {
+          bytes = new Uint8Array(rec.pdfData);
+        }
+      }
+      if (!bytes) {
+        throw new Error('No se encontraron los datos del documento PDF.');
+      }
+
+      const nextShareId = await publishPdfBytesToCloudShare({
+        titulo: docTitle || 'Publicación PDF',
+        bytes,
+        onProgress: (done, total) => {
+          const pct = Math.max(8, Math.min(100, Math.round((done / Math.max(1, total)) * 100)));
+          setSharePublishProgress({
+            pct,
+            label: `Publicando enlace de lectura (${done}/${total})...`,
+          });
+        },
+      });
+
+      setActiveShareId(nextShareId);
+      if (activeLocalIdRef.current) {
+        await updateLocalPdfMetadata(activeLocalIdRef.current, { sharedId: nextShareId });
+      }
+      setSharePublishProgress(null);
+    } catch (err) {
+      setSharePublishProgress(null);
+      setSharePublishError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'No se pudo generar el enlace público. Verifica tu sesión e intenta nuevamente.'
+      );
+    } finally {
+      setIsPublishingShare(false);
+    }
+  }, [activeShareId, docTitle, isPublishingShare, signedInUser]);
+
+  const openShareModal = useCallback(async () => {
+    setIsMoreMenuOpen(false);
+    setSharePublicUrl('');
+    setSharePublishError(null);
+    setSharePublishProgress(null);
+
+    let resolvedShareId = activeShareId;
+    if (!resolvedShareId && activeLocalIdRef.current) {
+      const localRec = await getLocalPublicationById(activeLocalIdRef.current);
+      if (localRec?.sharedId) {
+        const exists = await verifySharedPublicationExists(localRec.sharedId);
+        if (exists) {
+          resolvedShareId = localRec.sharedId;
+          setActiveShareId(localRec.sharedId);
+        } else {
+          await updateLocalPdfMetadata(activeLocalIdRef.current, { sharedId: null });
+        }
+      }
+    }
+
+    setShareModalOpen(true);
+
+    const isLocalOnly = !resolvedShareId && (isLocalPdf || pdfUrl.startsWith('blob:'));
+    if (isLocalOnly && signedInUser && isFirebaseReady()) {
+      void publishCurrentPdfToShare();
+    }
+  }, [activeShareId, isLocalPdf, pdfUrl, publishCurrentPdfToShare, signedInUser]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -1275,6 +1452,7 @@ export default function App() {
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
           params.delete('doc');
+          params.delete('share');
           params.set('title', file.name);
           if (saved?.id) {
             params.set('local', saved.id);
@@ -1283,6 +1461,7 @@ export default function App() {
           }
           window.history.replaceState(null, '', `?${params.toString()}`);
         }
+        setActiveShareId(saved?.sharedId ?? null);
         setIsLocalPdf(true);
         setIsLocalMissingError(false);
         setIsResolvingLocal(false);
@@ -1300,10 +1479,12 @@ export default function App() {
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
           params.delete('doc');
+          params.delete('share');
           params.delete('local');
           params.set('title', file.name);
           window.history.replaceState(null, '', `?${params.toString()}`);
         }
+        setActiveShareId(null);
         setIsLocalPdf(true);
         setIsLocalMissingError(false);
         setIsResolvingLocal(false);
@@ -1889,9 +2070,7 @@ export default function App() {
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    setIsMoreMenuOpen(false);
-                    setSharePublicUrl('');
-                    setShareModalOpen(true);
+                    void openShareModal();
                   }}
                   className="w-full px-3 py-2 rounded-lg text-left text-zinc-200 hover:bg-zinc-800 transition flex items-center gap-2.5 cursor-pointer"
                 >
@@ -2597,13 +2776,15 @@ export default function App() {
 
       {/* MODAL DE COMPARTIR */}
       {shareModalOpen && (() => {
-        const isLocalOnly = isLocalPdf || pdfUrl.startsWith('blob:');
+        const isLocalOnly = !activeShareId && (isLocalPdf || pdfUrl.startsWith('blob:'));
         const trimmedPublic = sharePublicUrl.trim();
         let canonicalShareUrl = '';
         let hasInvalidPublicUrl = false;
 
         if (typeof window !== 'undefined') {
-          if (isLocalOnly) {
+          if (activeShareId) {
+            canonicalShareUrl = buildCanonicalShareLink(activeShareId, window.location.pathname, window.location.origin);
+          } else if (isLocalOnly) {
             if (trimmedPublic) {
               if (/^https?:\/\//i.test(trimmedPublic)) {
                 try {
@@ -2648,47 +2829,96 @@ export default function App() {
               <p className="text-xs text-zinc-400 mb-4 flex items-start gap-2">
                 <FileText className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
                 <span>
-                  Copia el enlace para compartir este flipbook interactivo con tus lectores o clientes.
+                  Comparte este enlace de solo lectura con tus lectores, clientes o en tu portafolio. Nadie podrá editar tus publicaciones.
                 </span>
               </p>
 
+              {hasShareableUrl && (
+                <div className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200 leading-relaxed">
+                  Enlace público de solo lectura listo. Quien lo abra solo podrá visualizar la publicación.
+                </div>
+              )}
+
               {isLocalOnly && (
-                <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-2.5">
-                  <p className="text-xs text-amber-200 leading-relaxed">
-                    Este PDF está guardado solo en tu navegador. Si envías un enlace local, otras personas no podrán abrirlo. Pega un enlace público del PDF (Google Drive, Dropbox, GitHub o web) o descarga el archivo para enviarlo.
+                <div className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3.5 space-y-3">
+                  <p className="text-xs text-amber-100 leading-relaxed">
+                    Genera un enlace público de solo lectura para compartir esta publicación o ponerla en tu portafolio, sin que nadie pueda editar tu catálogo.
                   </p>
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="react-share-public-url-input"
-                      className="block text-[11px] font-semibold text-amber-300"
-                    >
-                      Enlace público del PDF (HTTPS)
-                    </label>
-                    <input
-                      id="react-share-public-url-input"
-                      type="url"
-                      value={sharePublicUrl}
-                      onChange={(e) => setSharePublicUrl(e.target.value)}
-                      placeholder="https://.../mi-publicacion.pdf"
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono"
-                    />
-                    {hasInvalidPublicUrl && (
-                      <p className="text-[11px] text-red-400">
-                        Ingresa una URL válida que comience con https:// o http://
-                      </p>
-                    )}
-                  </div>
+                  {sharePublishProgress && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-amber-200">
+                        <span>{sharePublishProgress.label}</span>
+                        <span className="font-mono tabular-nums">{sharePublishProgress.pct}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full transition-all duration-200"
+                          style={{ width: `${sharePublishProgress.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {sharePublishError && (
+                    <p className="text-[11px] text-red-300 bg-red-950/60 border border-red-500/30 rounded-lg px-2.5 py-2 leading-relaxed">
+                      {sharePublishError}
+                    </p>
+                  )}
                   <button
                     type="button"
+                    disabled={isPublishingShare}
                     onClick={() => {
-                      setShareModalOpen(false);
-                      void downloadActivePdf();
+                      void publishCurrentPdfToShare();
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <Download className="w-4 h-4 text-amber-400" />
-                    <span>Descargar PDF para enviar</span>
+                    <Share2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      {isPublishingShare
+                        ? 'Generando enlace...'
+                        : signedInUser
+                          ? 'Generar enlace público de lectura'
+                          : 'Conectar con Google y generar enlace'}
+                    </span>
                   </button>
+                  <details className="pt-1 border-t border-amber-500/20 text-xs">
+                    <summary className="cursor-pointer text-[11px] text-amber-300/90 hover:text-amber-200 select-none">
+                      O usar un enlace HTTPS externo / descargar copia
+                    </summary>
+                    <div className="mt-2.5 space-y-2.5">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="react-share-public-url-input"
+                          className="block text-[11px] font-medium text-zinc-300"
+                        >
+                          Enlace externo del PDF (Drive, Dropbox, GitHub)
+                        </label>
+                        <input
+                          id="react-share-public-url-input"
+                          type="url"
+                          value={sharePublicUrl}
+                          onChange={(e) => setSharePublicUrl(e.target.value)}
+                          placeholder="https://.../mi-publicacion.pdf"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono"
+                        />
+                        {hasInvalidPublicUrl && (
+                          <p className="text-[11px] text-red-400">
+                            Ingresa una URL válida que comience con https:// o http://
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShareModalOpen(false);
+                          void downloadActivePdf();
+                        }}
+                        className="w-full px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-[11px] font-medium transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Descargar copia PDF</span>
+                      </button>
+                    </div>
+                  </details>
                 </div>
               )}
 
@@ -2699,7 +2929,7 @@ export default function App() {
                   value={canonicalShareUrl}
                   placeholder={
                     isLocalOnly
-                      ? 'Pega arriba un enlace HTTPS para generar el link compartible'
+                      ? 'Genera el enlace arriba para copiarlo'
                       : ''
                   }
                   aria-label="Enlace de la publicación"

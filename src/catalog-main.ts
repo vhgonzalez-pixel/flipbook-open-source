@@ -13,6 +13,13 @@ import {
   subscribeToAuth,
   subscribeToUserCatalog,
 } from './catalog-firebase';
+import {
+  buildCanonicalShareLink,
+  deleteSharedPublicationFromCloud,
+  MAX_SHARED_PDF_BYTES,
+  publishPdfBytesToCloudShare,
+  verifySharedPublicationExists,
+} from './shared-publications';
 
 interface BuiltinPublication {
   titulo: string;
@@ -35,6 +42,7 @@ interface LocalPublication {
   coverDataUrl: string | null;
   pdfData: ArrayBuffer;
   addedAt: number;
+  sharedId?: string | null;
 }
 
 type CatalogItem =
@@ -135,6 +143,27 @@ const cloudPdfUrlInput = document.getElementById('cloud-pub-pdf-url') as HTMLInp
 const cloudCoverUrlInput = document.getElementById('cloud-pub-cover-url') as HTMLInputElement | null;
 const cloudDescInput = document.getElementById('cloud-pub-desc') as HTMLTextAreaElement | null;
 
+// Catalog Share modal
+const catalogShareModal = document.getElementById('catalog-share-modal') as HTMLElement | null;
+const catalogShareItemTitleEl = document.getElementById('catalog-share-item-title') as HTMLElement | null;
+const catalogShareReadonlyBadge = document.getElementById('catalog-share-readonly-badge') as HTMLElement | null;
+const catalogSharePublishBox = document.getElementById('catalog-share-publish-box') as HTMLElement | null;
+const catalogShareProgress = document.getElementById('catalog-share-progress') as HTMLElement | null;
+const catalogShareStatus = document.getElementById('catalog-share-status') as HTMLElement | null;
+const catalogSharePct = document.getElementById('catalog-share-pct') as HTMLElement | null;
+const catalogShareBar = document.getElementById('catalog-share-bar') as HTMLElement | null;
+const catalogShareError = document.getElementById('catalog-share-error') as HTMLElement | null;
+const catalogSharePublishBtn = document.getElementById('catalog-share-publish-btn') as HTMLButtonElement | null;
+const catalogSharePublishBtnLabel = document.getElementById('catalog-share-publish-btn-label') as HTMLElement | null;
+const catalogShareUrlInput = document.getElementById('catalog-share-url-input') as HTMLInputElement | null;
+const catalogShareCopyBtn = document.getElementById('catalog-share-copy-btn') as HTMLButtonElement | null;
+const catalogShareNativeBtn = document.getElementById('catalog-share-native-btn') as HTMLButtonElement | null;
+const catalogShareWhatsappBtn = document.getElementById('catalog-share-whatsapp-btn') as HTMLAnchorElement | null;
+const catalogShareTwitterBtn = document.getElementById('catalog-share-twitter-btn') as HTMLAnchorElement | null;
+const catalogShareEmailBtn = document.getElementById('catalog-share-email-btn') as HTMLAnchorElement | null;
+const catalogShareCloseX = document.getElementById('catalog-share-close-x') as HTMLButtonElement | null;
+const catalogShareCloseBtn = document.getElementById('catalog-share-close-btn') as HTMLButtonElement | null;
+
 const LOCAL_DB_NAME = 'flipbook_local_library_v1';
 const LOCAL_DB_VERSION = 1;
 const LOCAL_STORE_NAME = 'publications';
@@ -154,6 +183,9 @@ let activeCategory = 'Todas';
 let activeSyncPromise: Promise<void> | null = null;
 let pendingDeleteItem: CatalogItem | null = null;
 let lastUndoKey: string | null = null;
+let activeShareTarget: CatalogItem | null = null;
+let currentCatalogShareUrl = '';
+let isPublishingCatalogShare = false;
 
 function notifyLocalLibraryChanged(action: string, id?: string): void {
   try {
@@ -263,6 +295,7 @@ async function saveLocalPdfToLibrary(file: File, pdfData: ArrayBuffer): Promise<
       coverDataUrl: matched?.coverDataUrl ?? null,
       pdfData,
       addedAt: now,
+      sharedId: matched?.sharedId ?? null,
     };
 
     const db = await openLocalLibraryDb();
@@ -328,6 +361,41 @@ async function deleteLocalPublication(id: string): Promise<void> {
       // Ignorar
     }
     notifyLocalLibraryChanged('delete', id);
+  } catch {
+    // Ignorar
+  }
+}
+
+async function updateLocalSharedId(id: string, sharedId: string | null): Promise<void> {
+  if (!id) return;
+  try {
+    const db = await openLocalLibraryDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_NAME);
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const record = getReq.result as LocalPublication | undefined;
+        if (!record) return;
+        record.sharedId = sharedId;
+        store.put(record);
+      };
+      getReq.onerror = () => reject(getReq.error);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error || new Error('Transacción abortada'));
+      };
+    });
+    localPublications = localPublications.map((p) => (p.id === id ? { ...p, sharedId } : p));
+    notifyLocalLibraryChanged('update', id);
   } catch {
     // Ignorar
   }
@@ -650,6 +718,22 @@ function renderPublicationsGrid(): void {
     `;
     ctaRow.appendChild(readBtn);
 
+    const shareBtn = document.createElement('button');
+    shareBtn.type = 'button';
+    shareBtn.title = `Compartir enlace de solo lectura de ${item.titulo}`;
+    shareBtn.setAttribute('aria-label', `Compartir ${item.titulo}`);
+    shareBtn.className =
+      'p-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-amber-400 border border-zinc-700/80 hover:border-amber-500/40 transition-colors cursor-pointer shrink-0';
+    shareBtn.innerHTML = `
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+      </svg>
+    `;
+    shareBtn.addEventListener('click', () => {
+      void openCatalogShareModal(item);
+    });
+    ctaRow.appendChild(shareBtn);
+
     if (showDeleteButtons) {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
@@ -853,6 +937,9 @@ async function executeControlledDeletion(): Promise<void> {
   if (!target || !canUseDeleteMode() || !currentUser) return;
 
   if ('isLocal' in target && target.isLocal) {
+    if (target.sharedId) {
+      void deleteSharedPublicationFromCloud(target.sharedId);
+    }
     await deleteLocalPublication(target.id);
     await refreshCatalog();
     showCatalogNotice({
@@ -873,6 +960,176 @@ async function executeControlledDeletion(): Promise<void> {
       undoKey: key,
     });
   }
+}
+
+function updateCatalogShareUi(item: CatalogItem): void {
+  const title = item.titulo || 'Publicación Editorial';
+  let url = '';
+  let needsPublish = false;
+
+  if ('isLocal' in item && item.isLocal) {
+    if (item.sharedId) {
+      url = buildCanonicalShareLink(item.sharedId);
+    } else {
+      needsPublish = true;
+    }
+  } else {
+    url = new URL(buildViewerUrl(item), window.location.href).toString();
+  }
+
+  currentCatalogShareUrl = url;
+  const hasUrl = Boolean(url);
+
+  if (catalogShareItemTitleEl) catalogShareItemTitleEl.textContent = title;
+  if (catalogShareReadonlyBadge) catalogShareReadonlyBadge.classList.toggle('hidden', !hasUrl);
+  if (catalogSharePublishBox) catalogSharePublishBox.classList.toggle('hidden', !needsPublish);
+  if (catalogShareUrlInput) {
+    catalogShareUrlInput.value = url;
+    catalogShareUrlInput.placeholder = needsPublish ? 'Genera el enlace arriba para copiarlo' : '';
+  }
+  if (catalogShareCopyBtn) {
+    catalogShareCopyBtn.disabled = !hasUrl;
+  }
+  if (catalogSharePublishBtn && catalogSharePublishBtnLabel) {
+    catalogSharePublishBtn.disabled = isPublishingCatalogShare;
+    catalogSharePublishBtnLabel.textContent = isPublishingCatalogShare
+      ? 'Generando enlace...'
+      : currentUser
+        ? 'Generar enlace público de lectura'
+        : 'Conectar con Google y generar enlace';
+  }
+
+  const updateSocial = (el: HTMLAnchorElement | null, href: string) => {
+    if (!el) return;
+    if (hasUrl) {
+      el.href = href;
+      el.removeAttribute('aria-disabled');
+      el.classList.remove('opacity-40', 'pointer-events-none');
+    } else {
+      el.href = '#';
+      el.setAttribute('aria-disabled', 'true');
+      el.classList.add('opacity-40', 'pointer-events-none');
+    }
+  };
+
+  updateSocial(
+    catalogShareWhatsappBtn,
+    `https://api.whatsapp.com/send?text=${encodeURIComponent(`¡Hola! Te comparto esta publicación interactiva: ${title} - ${url}`)}`
+  );
+  updateSocial(
+    catalogShareTwitterBtn,
+    `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Explora esta publicación digital: ${title}`)}&url=${encodeURIComponent(url)}`
+  );
+  updateSocial(
+    catalogShareEmailBtn,
+    `mailto:?subject=${encodeURIComponent(`Publicación: ${title}`)}&body=${encodeURIComponent(`Hola,\n\nTe comparto este enlace de solo lectura para ver la publicación interactiva:\n\n${url}`)}`
+  );
+
+  if (catalogShareNativeBtn) {
+    catalogShareNativeBtn.classList.toggle('hidden', !(typeof navigator.share === 'function' && hasUrl));
+  }
+}
+
+async function publishLocalCatalogItemToShare(item: CatalogItem): Promise<void> {
+  if (!('isLocal' in item && item.isLocal) || isPublishingCatalogShare) return;
+  if (!isFirebaseReady()) {
+    if (catalogShareError) {
+      catalogShareError.textContent = 'Firebase no está configurado en esta instancia.';
+      catalogShareError.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (catalogShareError) {
+    catalogShareError.classList.add('hidden');
+    catalogShareError.textContent = '';
+  }
+
+  try {
+    if (!currentUser) {
+      const user = await signInIndividualUser();
+      if (!user) return;
+      currentUser = user;
+    }
+
+    isPublishingCatalogShare = true;
+    updateCatalogShareUi(item);
+    if (catalogShareProgress) catalogShareProgress.classList.remove('hidden');
+    if (catalogShareStatus) catalogShareStatus.textContent = 'Preparando documento...';
+    if (catalogSharePct) catalogSharePct.textContent = '5%';
+    if (catalogShareBar) catalogShareBar.style.width = '5%';
+
+    const bytes = new Uint8Array(item.pdfData);
+    const shareId = await publishPdfBytesToCloudShare({
+      titulo: item.titulo || item.fileName || 'Publicación PDF',
+      bytes,
+      onProgress: (done, total) => {
+        const pct = Math.max(8, Math.min(100, Math.round((done / Math.max(1, total)) * 100)));
+        if (catalogShareStatus) {
+          catalogShareStatus.textContent = `Publicando enlace de lectura (${done}/${total})...`;
+        }
+        if (catalogSharePct) catalogSharePct.textContent = `${pct}%`;
+        if (catalogShareBar) catalogShareBar.style.width = `${pct}%`;
+      },
+    });
+
+    item.sharedId = shareId;
+    await updateLocalSharedId(item.id, shareId);
+    if (catalogShareProgress) catalogShareProgress.classList.add('hidden');
+    if (activeShareTarget && 'isLocal' in activeShareTarget && activeShareTarget.isLocal && activeShareTarget.id === item.id) {
+      activeShareTarget.sharedId = shareId;
+      updateCatalogShareUi(activeShareTarget);
+    }
+  } catch (err) {
+    if (catalogShareProgress) catalogShareProgress.classList.add('hidden');
+    if (catalogShareError) {
+      catalogShareError.textContent =
+        err instanceof Error && err.message
+          ? err.message
+          : 'No se pudo generar el enlace público. Verifica tu sesión e intenta nuevamente.';
+      catalogShareError.classList.remove('hidden');
+    }
+  } finally {
+    isPublishingCatalogShare = false;
+    if (activeShareTarget) {
+      updateCatalogShareUi(activeShareTarget);
+    }
+  }
+}
+
+async function openCatalogShareModal(item: CatalogItem): Promise<void> {
+  if (!catalogShareModal) return;
+  activeShareTarget = item;
+  if (catalogShareError) {
+    catalogShareError.classList.add('hidden');
+    catalogShareError.textContent = '';
+  }
+  if (catalogShareProgress) {
+    catalogShareProgress.classList.add('hidden');
+  }
+
+  if ('isLocal' in item && item.isLocal && item.sharedId) {
+    const exists = await verifySharedPublicationExists(item.sharedId);
+    if (!exists) {
+      item.sharedId = null;
+      await updateLocalSharedId(item.id, null);
+    }
+  }
+
+  updateCatalogShareUi(item);
+  catalogShareModal.classList.remove('hidden');
+  catalogShareModal.classList.add('flex');
+
+  if ('isLocal' in item && item.isLocal && !item.sharedId && currentUser && isFirebaseReady()) {
+    void publishLocalCatalogItemToShare(item);
+  }
+}
+
+function closeCatalogShareModal(): void {
+  activeShareTarget = null;
+  if (!catalogShareModal) return;
+  catalogShareModal.classList.add('hidden');
+  catalogShareModal.classList.remove('flex');
 }
 
 async function handleSignInFlow(): Promise<void> {
@@ -1044,6 +1301,54 @@ deleteConfirmModal?.addEventListener('click', (e) => {
   if (e.target === deleteConfirmModal) closeDeleteModal();
 });
 
+catalogSharePublishBtn?.addEventListener('click', () => {
+  if (activeShareTarget) {
+    void publishLocalCatalogItemToShare(activeShareTarget);
+  }
+});
+catalogShareCopyBtn?.addEventListener('click', async () => {
+  if (!currentCatalogShareUrl) return;
+  try {
+    await navigator.clipboard.writeText(currentCatalogShareUrl);
+    const span = catalogShareCopyBtn.querySelector('span');
+    if (span) {
+      const prev = span.textContent;
+      span.textContent = '¡Copiado!';
+      setTimeout(() => {
+        span.textContent = prev;
+      }, 2000);
+    }
+  } catch {
+    if (catalogShareUrlInput) {
+      catalogShareUrlInput.select();
+      document.execCommand('copy');
+    }
+  }
+});
+catalogShareNativeBtn?.addEventListener('click', async () => {
+  if (typeof navigator.share === 'function' && currentCatalogShareUrl && activeShareTarget) {
+    try {
+      await navigator.share({
+        title: activeShareTarget.titulo || 'Publicación Editorial',
+        text: 'Explora esta publicación interactiva',
+        url: currentCatalogShareUrl,
+      });
+    } catch {
+      // Ignorar cancelación
+    }
+  }
+});
+[catalogShareWhatsappBtn, catalogShareTwitterBtn, catalogShareEmailBtn].forEach((el) => {
+  el?.addEventListener('click', (e) => {
+    if (!currentCatalogShareUrl) e.preventDefault();
+  });
+});
+catalogShareCloseX?.addEventListener('click', closeCatalogShareModal);
+catalogShareCloseBtn?.addEventListener('click', closeCatalogShareModal);
+catalogShareModal?.addEventListener('click', (e) => {
+  if (e.target === catalogShareModal) closeCatalogShareModal();
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (deleteConfirmModal && !deleteConfirmModal.classList.contains('hidden')) {
@@ -1055,6 +1360,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (cloudAddModal && !cloudAddModal.classList.contains('hidden')) {
     closeCloudAddModal();
+  }
+  if (catalogShareModal && !catalogShareModal.classList.contains('hidden')) {
+    closeCatalogShareModal();
   }
 });
 
@@ -1096,11 +1404,27 @@ catalogPdfUploadEl?.addEventListener('change', async (e) => {
   try {
     const buffer = await file.arrayBuffer();
     const saved = await saveLocalPdfToLibrary(file, buffer);
+    if (saved && saved.id && !saved.sharedId && currentUser && isFirebaseReady() && buffer.byteLength <= MAX_SHARED_PDF_BYTES) {
+      try {
+        const shareId = await publishPdfBytesToCloudShare({
+          titulo: saved.titulo,
+          bytes: new Uint8Array(buffer),
+        });
+        saved.sharedId = shareId;
+        await updateLocalSharedId(saved.id, shareId);
+      } catch {
+        // Si falla la publicación automática en segundo plano, queda disponible localmente y se puede reintentar desde Compartir
+      }
+    }
     await syncCatalogWithIndexedDB();
     if (saved && saved.id) {
       showCatalogNotice({
-        message: `«${saved.titulo}» guardado en tu biblioteca local y disponible entre sesiones.`,
-        openHref: `visor.html?local=${encodeURIComponent(saved.id)}`,
+        message: saved.sharedId
+          ? `«${saved.titulo}» guardado y listo para compartir con enlace de solo lectura.`
+          : `«${saved.titulo}» guardado en tu biblioteca local y disponible entre sesiones.`,
+        openHref: saved.sharedId
+          ? `visor.html?share=${encodeURIComponent(saved.sharedId)}`
+          : `visor.html?local=${encodeURIComponent(saved.id)}`,
       });
     }
   } finally {

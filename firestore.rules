@@ -150,6 +150,61 @@ service cloud.firestore {
       allow delete: if isOwner(userId) && isValidId(userId) && isValidId(publicationId);
     }
 
+    // Entity validation blueprint: SharedPublication
+    function isValidSharedPublication(data) {
+      return data.keys().hasAll([
+          'ownerId', 'titulo', 'sourceType', 'pdfUrl',
+          'chunkCount', 'fileSize', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'titulo', 'sourceType', 'pdfUrl',
+          'chunkCount', 'fileSize', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.titulo is string
+        && data.titulo.size() >= 1
+        && data.titulo.size() <= 140
+        && data.sourceType is string
+        && data.sourceType in ['chunks', 'url']
+        && data.pdfUrl is string
+        && data.pdfUrl.size() <= 500
+        && data.chunkCount is int
+        && data.chunkCount >= 0
+        && data.chunkCount <= 30
+        && data.fileSize is int
+        && data.fileSize >= 0
+        && data.fileSize <= 21000000
+        && (
+          (data.sourceType == 'chunks' && data.chunkCount >= 1 && data.fileSize >= 1 && data.pdfUrl.size() == 0)
+          || (data.sourceType == 'url' && data.chunkCount == 0 && isValidHttpsUrl(data.pdfUrl, 8, 500))
+        )
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // Entity validation blueprint: SharedPdfChunk
+    function isValidSharedPdfChunk(data, shareId) {
+      return data.keys().hasAll(['ownerId', 'shareId', 'index', 'data', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'shareId', 'index', 'data', 'createdAt'])
+        && data.ownerId is string
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.shareId is string
+        && data.shareId == shareId
+        && isValidId(data.shareId)
+        && data.index is int
+        && data.index >= 0
+        && data.index < 30
+        && data.data is bytes
+        && data.data.size() >= 1
+        && data.data.size() <= 720000
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
     // Isolated PII private profile
     match /users/{userId}/private/{docId} {
       allow get: if isOwner(userId) && isValidId(userId) && isValidId(docId) && docId == 'profile';
@@ -167,6 +222,46 @@ service cloud.firestore {
         && incoming().ownerId == existing().ownerId
         && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'updatedAt']);
       allow delete: if isOwner(userId) && isValidId(userId) && isValidId(docId) && docId == 'profile';
+    }
+
+    // Public read-only shared publications (get by exact shareId; owner-only writes/deletes)
+    match /sharedPublications/{shareId} {
+      allow get: if isValidId(shareId);
+      allow list: if isEmailVerified() && existing().ownerId == request.auth.uid;
+      allow create: if isEmailVerified()
+        && isValidId(shareId)
+        && isValidSharedPublication(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isEmailVerified()
+        && isValidId(shareId)
+        && isValidSharedPublication(incoming())
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().sourceType == existing().sourceType
+        && incoming().chunkCount == existing().chunkCount
+        && incoming().fileSize == existing().fileSize
+        && incoming().pdfUrl == existing().pdfUrl
+        && incoming().diff(existing()).affectedKeys().hasOnly(['titulo', 'updatedAt']);
+      allow delete: if isValidId(shareId) && isOwner(existing().ownerId);
+    }
+
+    // Immutable binary chunks for shared publications (Master Gate enforces parent owner)
+    match /sharedPublications/{shareId}/chunks/{chunkId} {
+      allow get: if isValidId(shareId) && isValidId(chunkId);
+      allow list: if false;
+      allow create: if isEmailVerified()
+        && isValidId(shareId)
+        && isValidId(chunkId)
+        && isValidSharedPdfChunk(incoming(), shareId)
+        && exists(/databases/$(database)/documents/sharedPublications/$(shareId))
+        && get(/databases/$(database)/documents/sharedPublications/$(shareId)).data.ownerId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isEmailVerified()
+        && isValidId(shareId)
+        && isValidId(chunkId)
+        && isOwner(existing().ownerId)
+        && get(/databases/$(database)/documents/sharedPublications/$(shareId)).data.ownerId == request.auth.uid;
     }
   }
 }

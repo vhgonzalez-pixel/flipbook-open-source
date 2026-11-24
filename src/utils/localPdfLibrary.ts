@@ -10,6 +10,7 @@ export interface LocalPublicationRecord {
   coverDataUrl: string | null;
   pdfData: ArrayBuffer;
   addedAt: number;
+  sharedId?: string | null;
 }
 
 export interface LocalPublicationSummary {
@@ -211,6 +212,7 @@ export async function saveLocalPdfToLibrary(
       coverDataUrl: matched?.coverDataUrl ?? null,
       pdfData,
       addedAt: now,
+      sharedId: matched?.sharedId ?? null,
     };
 
     const db = await openLocalLibraryDb();
@@ -248,7 +250,7 @@ export async function saveLocalPdfToLibrary(
 
 export async function updateLocalPdfMetadata(
   id: string,
-  patch: { pageCount?: number; coverDataUrl?: string | null }
+  patch: { pageCount?: number; coverDataUrl?: string | null; sharedId?: string | null }
 ): Promise<void> {
   if (!id) return;
   try {
@@ -269,6 +271,7 @@ export async function updateLocalPdfMetadata(
           pageCount: nextPageCount,
           coverDataUrl:
             patch.coverDataUrl !== undefined ? patch.coverDataUrl : current.coverDataUrl,
+          sharedId: patch.sharedId !== undefined ? patch.sharedId : (current.sharedId ?? null),
           descripcion: buildLocalPublicationDescription(nextPageCount, current.fileSize),
         };
         const putReq = store.put(updated);

@@ -127,6 +127,101 @@
         }
       },
       "required": ["ownerId", "email", "displayName", "updatedAt"]
+    },
+    "SharedPublication": {
+      "title": "SharedPublication",
+      "description": "Public read-only share descriptor for a publication viewable by recipients without edit access.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner who published and controls this shared link.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "titulo": {
+          "type": "string",
+          "description": "Display title of the shared publication.",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "sourceType": {
+          "type": "string",
+          "description": "Whether PDF content is stored as Firestore binary chunks or an external HTTPS URL.",
+          "enum": ["chunks", "url"]
+        },
+        "pdfUrl": {
+          "type": "string",
+          "description": "External HTTPS URL when sourceType is 'url', empty string when 'chunks'.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "chunkCount": {
+          "type": "integer",
+          "description": "Number of binary chunks when sourceType is 'chunks' (1..30), or 0 for 'url'."
+        },
+        "fileSize": {
+          "type": "integer",
+          "description": "Total byte size of the PDF file (up to 21000000 bytes)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "ownerId",
+        "titulo",
+        "sourceType",
+        "pdfUrl",
+        "chunkCount",
+        "fileSize",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SharedPdfChunk": {
+      "title": "SharedPdfChunk",
+      "description": "Immutable binary slice of a shared PDF stored under a SharedPublication document.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the parent SharedPublication ownerId.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "shareId": {
+          "type": "string",
+          "description": "Parent SharedPublication document ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Zero-based sequential chunk index (0..29)."
+        },
+        "data": {
+          "type": "string",
+          "format": "byte",
+          "description": "Binary PDF chunk stored as Firestore Bytes (1..720000 bytes)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server timestamp of chunk creation."
+        }
+      },
+      "required": ["ownerId", "shareId", "index", "data", "createdAt"]
     }
   },
   "firestore": {
@@ -147,6 +242,18 @@
         "$ref": "#/entities/UserPrivateProfile"
       },
       "description": "PII-isolated private profile document accessible strictly by the verified owner."
+    },
+    "/sharedPublications/{shareId}": {
+      "schema": {
+        "$ref": "#/entities/SharedPublication"
+      },
+      "description": "Read-only public share records resolved by exact shareId; writable and deletable exclusively by the verified owner."
+    },
+    "/sharedPublications/{shareId}/chunks/{chunkId}": {
+      "schema": {
+        "$ref": "#/entities/SharedPdfChunk"
+      },
+      "description": "Immutable binary PDF chunks for shared publications; readable by exact shareId+chunkId, writable only by the parent owner."
     }
   }
 }
