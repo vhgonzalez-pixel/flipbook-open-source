@@ -407,7 +407,10 @@ function getCatalogPublications(): CatalogItem[] {
 
 function buildViewerUrl(item: CatalogItem): string {
   if ('isLocal' in item && item.isLocal && item.id) {
-    const params = new URLSearchParams({ local: item.id });
+    const params = new URLSearchParams({
+      local: item.id,
+      title: item.titulo || item.fileName || 'Publicación local',
+    });
     return `visor.html?${params.toString()}`;
   }
   const params = new URLSearchParams({

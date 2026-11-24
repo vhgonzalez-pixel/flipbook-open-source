@@ -630,9 +630,27 @@
             <p class="text-xs text-zinc-400 mb-4 leading-relaxed">
                 Comparte este enlace con tus lectores, amigos o clientes para que puedan abrir el visor interactivo al instante.
             </p>
+            <div id="share-local-warning" class="hidden mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-2.5">
+                <p class="text-xs text-amber-200 leading-relaxed">
+                    Este PDF está guardado solo en tu navegador. Si envías un enlace local, otras personas no podrán abrirlo. Pega un enlace público del PDF (Google Drive, Dropbox, GitHub o web) o descarga el archivo para enviarlo.
+                </p>
+                <div class="space-y-1.5">
+                    <label for="share-public-url-input" class="block text-[11px] font-semibold text-amber-300">
+                        Enlace público del PDF (HTTPS)
+                    </label>
+                    <input id="share-public-url-input" type="url" placeholder="https://.../mi-publicacion.pdf" class="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono">
+                    <p id="share-public-url-error" class="hidden text-[11px] text-red-400">
+                        Ingresa una URL válida que comience con https:// o http://
+                    </p>
+                </div>
+                <button id="share-local-download-btn" type="button" class="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span>Descargar PDF para enviar</span>
+                </button>
+            </div>
             <div class="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-2 mb-4">
                 <input id="share-url-input" type="text" readonly aria-label="Enlace de la publicación" class="bg-transparent text-xs text-zinc-300 flex-1 px-2 outline-none font-mono">
-                <button id="share-copy-btn" type="button" class="bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-semibold px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+                <button id="share-copy-btn" type="button" class="bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold px-3.5 py-2 rounded-lg transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
                     <span>Copiar</span>
                 </button>
             </div>
@@ -2801,6 +2819,10 @@
         menuPrintBtn.addEventListener('click', () => printActivePdf());
 
         const shareModal = document.getElementById('share-modal');
+        const shareLocalWarning = document.getElementById('share-local-warning');
+        const sharePublicUrlInput = document.getElementById('share-public-url-input');
+        const sharePublicUrlError = document.getElementById('share-public-url-error');
+        const shareLocalDownloadBtn = document.getElementById('share-local-download-btn');
         const shareUrlInput = document.getElementById('share-url-input');
         const shareCopyBtn = document.getElementById('share-copy-btn');
         const nativeShareBtn = document.getElementById('native-share-btn');
@@ -2810,26 +2832,108 @@
         const shareModalCloseX = document.getElementById('share-modal-close-x');
         const shareModalCloseBtn = document.getElementById('share-modal-close-btn');
         const menuShareBtn = document.getElementById('menu-share-btn');
+        let currentShareUrl = '';
+
+        function isViewingLocalPdf() {
+            return Boolean(activeLocalId) ||
+                (typeof activeDocUrl === 'string' && activeDocUrl.startsWith('blob:')) ||
+                Boolean(parseLocalQueryParam(window.location.search));
+        }
+
+        function buildCanonicalShareUrl(overridePublicUrl = '') {
+            const currentTitle = (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación Editorial';
+            const trimmedOverride = String(overridePublicUrl || '').trim();
+            const isLocalOnly = isViewingLocalPdf();
+
+            if (isLocalOnly) {
+                if (!trimmedOverride) {
+                    return { url: '', isLocalOnly: true, hasInvalidOverride: false };
+                }
+                if (!isExternalHttpUrl(trimmedOverride)) {
+                    return { url: '', isLocalOnly: true, hasInvalidOverride: true };
+                }
+                try {
+                    const parsed = new URL(trimmedOverride);
+                    const shareUrl = new URL(window.location.pathname, window.location.origin);
+                    shareUrl.searchParams.set('doc', parsed.toString());
+                    shareUrl.searchParams.set('title', currentTitle);
+                    return { url: shareUrl.toString(), isLocalOnly: true, hasInvalidOverride: false };
+                } catch {
+                    return { url: '', isLocalOnly: true, hasInvalidOverride: true };
+                }
+            }
+
+            const sourceDocUrl = (activeDocUrl && !activeDocUrl.startsWith('blob:')) ? activeDocUrl : DEFAULT_PDF_URL;
+            const shareUrl = new URL(window.location.pathname, window.location.origin);
+            shareUrl.searchParams.set('doc', sourceDocUrl);
+            shareUrl.searchParams.set('title', currentTitle);
+            return { url: shareUrl.toString(), isLocalOnly: false, hasInvalidOverride: false };
+        }
+
+        function syncShareModalState() {
+            const currentTitle = (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación Editorial';
+            const rawOverride = sharePublicUrlInput ? sharePublicUrlInput.value : '';
+            const shareState = buildCanonicalShareUrl(rawOverride);
+            currentShareUrl = shareState.url;
+            const hasShareableUrl = Boolean(currentShareUrl);
+
+            if (shareLocalWarning) {
+                shareLocalWarning.classList.toggle('hidden', !shareState.isLocalOnly);
+            }
+            if (sharePublicUrlError) {
+                sharePublicUrlError.classList.toggle('hidden', !(shareState.isLocalOnly && shareState.hasInvalidOverride));
+            }
+            if (shareUrlInput) {
+                shareUrlInput.value = currentShareUrl;
+                shareUrlInput.placeholder = shareState.isLocalOnly
+                    ? 'Pega arriba un enlace HTTPS para generar el link compartible'
+                    : '';
+            }
+            if (shareCopyBtn) {
+                shareCopyBtn.disabled = !hasShareableUrl;
+            }
+
+            const setSocialLinkState = (el, href) => {
+                if (!el) return;
+                if (hasShareableUrl) {
+                    el.href = href;
+                    el.removeAttribute('aria-disabled');
+                    el.classList.remove('opacity-40', 'pointer-events-none');
+                } else {
+                    el.href = '#';
+                    el.setAttribute('aria-disabled', 'true');
+                    el.classList.add('opacity-40', 'pointer-events-none');
+                }
+            };
+
+            setSocialLinkState(
+                shareWhatsappBtn,
+                `https://api.whatsapp.com/send?text=${encodeURIComponent('¡Hola! Te comparto esta publicación interactiva: ' + currentTitle + ' - ' + currentShareUrl)}`
+            );
+            setSocialLinkState(
+                shareTwitterBtn,
+                `https://twitter.com/intent/tweet?text=${encodeURIComponent('Explora esta publicación digital: ' + currentTitle)}&url=${encodeURIComponent(currentShareUrl)}`
+            );
+            setSocialLinkState(
+                shareEmailBtn,
+                `mailto:?subject=${encodeURIComponent('Publicación: ' + currentTitle)}&body=${encodeURIComponent('Hola,\n\nTe comparto este enlace para leer la publicación interactiva:\n\n' + currentShareUrl)}`
+            );
+
+            if (nativeShareBtn) {
+                if (navigator.share && hasShareableUrl) {
+                    nativeShareBtn.classList.remove('hidden');
+                } else {
+                    nativeShareBtn.classList.add('hidden');
+                }
+            }
+        }
 
         function openShareModal() {
             toggleMoreActionsMenu(false);
-            const currentUrl = window.location.href;
-            const currentTitle = (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación Editorial';
-            if (shareUrlInput) shareUrlInput.value = currentUrl;
-            if (shareWhatsappBtn) {
-                shareWhatsappBtn.href = `https://api.whatsapp.com/send?text=${encodeURIComponent('¡Hola! Te comparto esta publicación interactiva: ' + currentTitle + ' - ' + currentUrl)}`;
+            if (sharePublicUrlInput) {
+                sharePublicUrlInput.value = '';
             }
-            if (shareTwitterBtn) {
-                shareTwitterBtn.href = `https://twitter.com/intent/tweet?text=${encodeURIComponent('Explora esta publicación digital: ' + currentTitle)}&url=${encodeURIComponent(currentUrl)}`;
-            }
-            if (shareEmailBtn) {
-                shareEmailBtn.href = `mailto:?subject=${encodeURIComponent('Publicación: ' + currentTitle)}&body=${encodeURIComponent('Hola,\n\nTe comparto este enlace para leer la publicación interactiva:\n\n' + currentUrl)}`;
-            }
-            if (navigator.share) {
-                nativeShareBtn.classList.remove('hidden');
-            } else {
-                nativeShareBtn.classList.add('hidden');
-            }
+            syncShareModalState();
             if (shareModal) shareModal.classList.remove('hidden');
         }
 
@@ -2838,6 +2942,21 @@
         }
 
         if (menuShareBtn) menuShareBtn.addEventListener('click', () => openShareModal());
+        if (sharePublicUrlInput) {
+            sharePublicUrlInput.addEventListener('input', () => syncShareModalState());
+        }
+        if (shareLocalDownloadBtn) {
+            shareLocalDownloadBtn.addEventListener('click', () => {
+                closeShareModal();
+                void downloadActivePdf();
+            });
+        }
+        [shareWhatsappBtn, shareTwitterBtn, shareEmailBtn].forEach((el) => {
+            if (!el) return;
+            el.addEventListener('click', (e) => {
+                if (!currentShareUrl) e.preventDefault();
+            });
+        });
         if (shareModalCloseX) shareModalCloseX.addEventListener('click', closeShareModal);
         if (shareModalCloseBtn) shareModalCloseBtn.addEventListener('click', closeShareModal);
         if (shareModal) {
@@ -2847,8 +2966,9 @@
         }
         if (shareCopyBtn) {
             shareCopyBtn.addEventListener('click', async () => {
+                if (!currentShareUrl) return;
                 try {
-                    await navigator.clipboard.writeText(window.location.href);
+                    await navigator.clipboard.writeText(currentShareUrl);
                     const span = shareCopyBtn.querySelector('span');
                     if (span) {
                         const original = span.textContent;
@@ -2865,12 +2985,12 @@
         }
         if (nativeShareBtn) {
             nativeShareBtn.addEventListener('click', async () => {
-                if (navigator.share) {
+                if (navigator.share && currentShareUrl) {
                     try {
                         await navigator.share({
                             title: (docTitleEl ? docTitleEl.textContent : '') || activeDocTitle || 'Publicación Editorial',
                             text: 'Explora esta publicación interactiva',
-                            url: window.location.href
+                            url: currentShareUrl
                         });
                     } catch {}
                 }
@@ -3044,12 +3164,15 @@
                 }
                 activeObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
                 const nextLocalId = saved ? saved.id : null;
+                const params = new URLSearchParams(window.location.search);
+                params.delete('doc');
+                params.set('title', file.name);
                 if (nextLocalId) {
-                    const params = new URLSearchParams(window.location.search);
-                    params.delete('doc');
                     params.set('local', nextLocalId);
-                    window.history.replaceState(null, '', `?${params.toString()}`);
+                } else {
+                    params.delete('local');
                 }
+                window.history.replaceState(null, '', `?${params.toString()}`);
                 await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: nextLocalId });
             } catch (err) {
                 console.error('Error guardando PDF local en biblioteca:', err);
@@ -3057,6 +3180,11 @@
                     URL.revokeObjectURL(activeObjectUrl);
                 }
                 activeObjectUrl = URL.createObjectURL(file);
+                const params = new URLSearchParams(window.location.search);
+                params.delete('doc');
+                params.delete('local');
+                params.set('title', file.name);
+                window.history.replaceState(null, '', `?${params.toString()}`);
                 await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: null });
             } finally {
                 input.value = '';
@@ -3071,6 +3199,12 @@
         });
 
         retryBtn.addEventListener('click', () => {
+            const queryInfo = parseDocQueryParam(window.location.search);
+            const requestedLocalId = parseLocalQueryParam(window.location.search);
+            if (queryInfo.isInvalidScheme || (requestedLocalId && (!activeDocUrl || !activeDocUrl.startsWith('blob:')))) {
+                void bootstrapViewer();
+                return;
+            }
             void loadPDFAndInitFlipbook(activeDocUrl, activeDocTitle, { localId: activeLocalId });
         });
 
@@ -3122,6 +3256,7 @@
             }
 
             const requestedLocalId = parseLocalQueryParam(window.location.search);
+            const requestedTitle = (new URLSearchParams(window.location.search).get('title') || '').trim();
             let storedActiveLocalId = null;
             try {
                 storedActiveLocalId = localStorage.getItem(ACTIVE_LOCAL_ID_KEY);
@@ -3146,12 +3281,28 @@
                     if (!requestedLocalId) {
                         const params = new URLSearchParams(window.location.search);
                         params.set('local', localRecord.id);
+                        params.set('title', localRecord.fileName);
                         window.history.replaceState(null, '', `?${params.toString()}`);
                     }
                     await loadPDFAndInitFlipbook(activeObjectUrl, localRecord.fileName, {
                         localId: localRecord.id
                     });
                     return;
+                }
+
+                if (requestedLocalId) {
+                    activeLocalId = requestedLocalId;
+                    activeDocUrl = '';
+                    activeDocTitle = requestedTitle || 'Publicación local no disponible';
+                    docTitleEl.textContent = activeDocTitle;
+                    showError('Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que comparta un enlace público (HTTPS) o te envíe el archivo PDF directamente.');
+                    return;
+                }
+
+                try {
+                    localStorage.removeItem(ACTIVE_LOCAL_ID_KEY);
+                } catch {
+                    // Ignorar
                 }
             }
 

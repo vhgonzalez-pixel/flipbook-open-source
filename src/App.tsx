@@ -104,6 +104,16 @@ export default function App() {
       ),
     []
   );
+  const initialLocalQuery = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { requestedLocalId: null as string | null, requestedTitle: '' };
+    }
+    const params = new URLSearchParams(window.location.search);
+    return {
+      requestedLocalId: parseLocalQueryParam(window.location.search),
+      requestedTitle: (params.get('title') || '').trim(),
+    };
+  }, []);
 
   const [pdfUrl, setPdfUrl] = useState<string>(
     initialQuery.hasDocParam && initialQuery.docUrl
@@ -113,9 +123,24 @@ export default function App() {
   const [docTitle, setDocTitle] = useState<string>(
     initialQuery.hasDocParam && initialQuery.displayTitle
       ? initialQuery.displayTitle
-      : DEFAULT_DOC_TITLE
+      : initialLocalQuery.requestedLocalId && initialLocalQuery.requestedTitle
+        ? initialLocalQuery.requestedTitle
+        : DEFAULT_DOC_TITLE
   );
   const [hasUrlDocParam] = useState<boolean>(initialQuery.hasDocParam);
+  const [isLocalPdf, setIsLocalPdf] = useState<boolean>(
+    Boolean(!initialQuery.hasDocParam && initialLocalQuery.requestedLocalId)
+  );
+  const [isResolvingLocal, setIsResolvingLocal] = useState<boolean>(() => {
+    if (initialQuery.hasDocParam) return false;
+    if (initialLocalQuery.requestedLocalId) return true;
+    try {
+      return Boolean(typeof window !== 'undefined' && localStorage.getItem(ACTIVE_LOCAL_ID_STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  });
+  const [isLocalMissingError, setIsLocalMissingError] = useState<boolean>(false);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -142,6 +167,7 @@ export default function App() {
   const [isPreparingPrint, setIsPreparingPrint] = useState<boolean>(false);
   const [printPrepProgress, setPrintPrepProgress] = useState<string>('Generando páginas...');
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
+  const [sharePublicUrl, setSharePublicUrl] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -485,11 +511,12 @@ export default function App() {
 
   // Restaurar publicación local desde ?local= o último PDF local activo si no hay ?doc=
   useEffect(() => {
-    if (initialQuery.hasDocParam) return;
+    if (initialQuery.hasDocParam) {
+      setIsResolvingLocal(false);
+      return;
+    }
     let cancelled = false;
-    const requestedLocalId = parseLocalQueryParam(
-      typeof window !== 'undefined' ? window.location.search : ''
-    );
+    const requestedLocalId = initialLocalQuery.requestedLocalId;
     let storedId: string | null = null;
     try {
       storedId = localStorage.getItem(ACTIVE_LOCAL_ID_STORAGE_KEY);
@@ -497,16 +524,41 @@ export default function App() {
       storedId = null;
     }
     const targetId = requestedLocalId || storedId;
-    if (!targetId) return;
+    if (!targetId) {
+      setIsResolvingLocal(false);
+      return;
+    }
 
     void (async () => {
       const record = await getLocalPublicationById(targetId);
-      if (cancelled || !record || !record.pdfData) return;
+      if (cancelled) return;
+      const blob = record && record.pdfData ? createPdfBlobFromRecord(record) : null;
+      if (!record || !blob) {
+        if (requestedLocalId) {
+          activeLocalIdRef.current = requestedLocalId;
+          setIsLocalPdf(true);
+          setIsLocalMissingError(true);
+          setDocTitle(initialLocalQuery.requestedTitle || 'Publicación local no disponible');
+          setErrorMessage(
+            'Este enlace corresponde a un archivo PDF guardado únicamente en el navegador de quien lo compartió. Para verlo en otro dispositivo, pídele que comparta un enlace público (HTTPS) o te envíe el archivo PDF directamente.'
+          );
+          setIsLoading(false);
+          setIsResolvingLocal(false);
+          return;
+        }
+        try {
+          localStorage.removeItem(ACTIVE_LOCAL_ID_STORAGE_KEY);
+        } catch {
+          // Ignorar
+        }
+        setIsLocalPdf(false);
+        setIsResolvingLocal(false);
+        return;
+      }
+
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
       }
-      const blob = createPdfBlobFromRecord(record);
-      if (!blob) return;
       const nextUrl = URL.createObjectURL(blob);
       objectUrlRef.current = nextUrl;
       activeLocalIdRef.current = record.id;
@@ -518,19 +570,28 @@ export default function App() {
       if (!requestedLocalId && typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         params.set('local', record.id);
+        params.set('title', record.fileName);
         window.history.replaceState(null, '', `?${params.toString()}`);
       }
+      setIsLocalPdf(true);
+      setIsLocalMissingError(false);
       setPdfUrl(nextUrl);
       setDocTitle(record.fileName);
+      setIsResolvingLocal(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [initialQuery.hasDocParam]);
+  }, [initialQuery.hasDocParam, initialLocalQuery.requestedLocalId, initialLocalQuery.requestedTitle]);
 
   // Cargar PDF con barra de progreso real y renderizado perezoso prioritario
   useEffect(() => {
+    if (isResolvingLocal) return;
+    if (isLocalMissingError) {
+      setIsLoading(false);
+      return;
+    }
     if (initialQuery.hasDocParam && initialQuery.isInvalidScheme && pdfUrl === DEFAULT_PDF_URL) {
       setIsLoading(false);
       return;
@@ -714,7 +775,16 @@ export default function App() {
       isMounted = false;
       cancelIdleRender();
     };
-  }, [pdfUrl, reloadNonce, cancelIdleRender, renderPageSlot, prioritizeWindowAround, initialQuery]);
+  }, [
+    pdfUrl,
+    reloadNonce,
+    cancelIdleRender,
+    renderPageSlot,
+    prioritizeWindowAround,
+    initialQuery,
+    isResolvingLocal,
+    isLocalMissingError,
+  ]);
 
   // Inicializar o reconfigurar StPageFlip reutilizando los PageSlots sin duplicar bitmaps
   useEffect(() => {
@@ -1202,12 +1272,21 @@ export default function App() {
         const url = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
         objectUrlRef.current = url;
         activeLocalIdRef.current = saved ? saved.id : null;
-        if (saved?.id && typeof window !== 'undefined') {
+        if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
           params.delete('doc');
-          params.set('local', saved.id);
+          params.set('title', file.name);
+          if (saved?.id) {
+            params.set('local', saved.id);
+          } else {
+            params.delete('local');
+          }
           window.history.replaceState(null, '', `?${params.toString()}`);
         }
+        setIsLocalPdf(true);
+        setIsLocalMissingError(false);
+        setIsResolvingLocal(false);
+        setSharePublicUrl('');
         setPdfUrl(url);
         setDocTitle(file.name);
         setErrorMessage(null);
@@ -1218,6 +1297,17 @@ export default function App() {
         const url = URL.createObjectURL(file);
         objectUrlRef.current = url;
         activeLocalIdRef.current = null;
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          params.delete('doc');
+          params.delete('local');
+          params.set('title', file.name);
+          window.history.replaceState(null, '', `?${params.toString()}`);
+        }
+        setIsLocalPdf(true);
+        setIsLocalMissingError(false);
+        setIsResolvingLocal(false);
+        setSharePublicUrl('');
         setPdfUrl(url);
         setDocTitle(file.name);
         setErrorMessage(null);
@@ -1800,6 +1890,7 @@ export default function App() {
                   role="menuitem"
                   onClick={() => {
                     setIsMoreMenuOpen(false);
+                    setSharePublicUrl('');
                     setShareModalOpen(true);
                   }}
                   className="w-full px-3 py-2 rounded-lg text-left text-zinc-200 hover:bg-zinc-800 transition flex items-center gap-2.5 cursor-pointer"
@@ -1892,6 +1983,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (isLocalMissingError) return;
                     setErrorMessage(null);
                     setReloadNonce((n) => n + 1);
                   }}
@@ -1902,6 +1994,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    try {
+                      localStorage.removeItem(ACTIVE_LOCAL_ID_STORAGE_KEY);
+                    } catch {
+                      // Ignorar
+                    }
+                    activeLocalIdRef.current = null;
+                    if (typeof window !== 'undefined') {
+                      window.history.replaceState(null, '', window.location.pathname);
+                    }
+                    setIsLocalMissingError(false);
+                    setIsLocalPdf(false);
+                    setIsResolvingLocal(false);
                     setErrorMessage(null);
                     setPdfUrl(DEFAULT_PDF_URL);
                     setDocTitle(DEFAULT_DOC_TITLE);
@@ -2492,104 +2596,215 @@ export default function App() {
       </div>
 
       {/* MODAL DE COMPARTIR */}
-      {shareModalOpen && (
-        <div
-          className="no-print fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="share-modal-title"
-        >
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <h3
-              id="share-modal-title"
-              className="text-lg font-bold text-zinc-100 mb-2 flex items-center gap-2"
-            >
-              <Share2 className="w-5 h-5 text-amber-500" />
-              <span>Compartir Publicación</span>
-            </h3>
-            <p className="text-xs text-zinc-400 mb-4 flex items-start gap-2">
-              <FileText className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-              <span>
-                Copia el enlace para compartir este flipbook interactivo con tus lectores o clientes.
-              </span>
-            </p>
-            <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-2 mb-4">
-              <input
-                type="text"
-                readOnly
-                value={typeof window !== 'undefined' ? window.location.href : ''}
-                aria-label="Enlace de la publicación"
-                className="bg-transparent text-xs text-zinc-300 flex-1 px-2 outline-none font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.href);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                className="bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap cursor-pointer"
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : null}
-                <span>{copied ? '¡Copiado!' : 'Copiar'}</span>
-              </button>
-            </div>
+      {shareModalOpen && (() => {
+        const isLocalOnly = isLocalPdf || pdfUrl.startsWith('blob:');
+        const trimmedPublic = sharePublicUrl.trim();
+        let canonicalShareUrl = '';
+        let hasInvalidPublicUrl = false;
 
-            <div className="space-y-2 mb-5">
-              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.share({
-                      title: docTitle,
-                      text: 'Explora esta publicación interactiva',
-                      url: window.location.href,
-                    }).catch(() => {});
-                  }}
-                  className="w-full px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Share2 className="w-4 h-4 text-amber-400" />
-                  <span>Compartir mediante aplicaciones del dispositivo...</span>
-                </button>
+        if (typeof window !== 'undefined') {
+          if (isLocalOnly) {
+            if (trimmedPublic) {
+              if (/^https?:\/\//i.test(trimmedPublic)) {
+                try {
+                  const parsedPublic = new URL(trimmedPublic);
+                  const target = new URL(window.location.pathname, window.location.origin);
+                  target.searchParams.set('doc', parsedPublic.toString());
+                  target.searchParams.set('title', docTitle || 'Publicación Editorial');
+                  canonicalShareUrl = target.toString();
+                } catch {
+                  hasInvalidPublicUrl = true;
+                }
+              } else {
+                hasInvalidPublicUrl = true;
+              }
+            }
+          } else {
+            const sourceDoc = !pdfUrl.startsWith('blob:') ? pdfUrl : DEFAULT_PDF_URL;
+            const target = new URL(window.location.pathname, window.location.origin);
+            target.searchParams.set('doc', sourceDoc);
+            target.searchParams.set('title', docTitle || 'Publicación Editorial');
+            canonicalShareUrl = target.toString();
+          }
+        }
+
+        const hasShareableUrl = Boolean(canonicalShareUrl);
+
+        return (
+          <div
+            className="no-print fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="share-modal-title"
+          >
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+              <h3
+                id="share-modal-title"
+                className="text-lg font-bold text-zinc-100 mb-2 flex items-center gap-2"
+              >
+                <Share2 className="w-5 h-5 text-amber-500" />
+                <span>Compartir Publicación</span>
+              </h3>
+              <p className="text-xs text-zinc-400 mb-4 flex items-start gap-2">
+                <FileText className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
+                <span>
+                  Copia el enlace para compartir este flipbook interactivo con tus lectores o clientes.
+                </span>
+              </p>
+
+              {isLocalOnly && (
+                <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-2.5">
+                  <p className="text-xs text-amber-200 leading-relaxed">
+                    Este PDF está guardado solo en tu navegador. Si envías un enlace local, otras personas no podrán abrirlo. Pega un enlace público del PDF (Google Drive, Dropbox, GitHub o web) o descarga el archivo para enviarlo.
+                  </p>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="react-share-public-url-input"
+                      className="block text-[11px] font-semibold text-amber-300"
+                    >
+                      Enlace público del PDF (HTTPS)
+                    </label>
+                    <input
+                      id="react-share-public-url-input"
+                      type="url"
+                      value={sharePublicUrl}
+                      onChange={(e) => setSharePublicUrl(e.target.value)}
+                      placeholder="https://.../mi-publicacion.pdf"
+                      className="w-full rounded-lg bg-zinc-950 border border-zinc-700 focus:border-amber-500 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none font-mono"
+                    />
+                    {hasInvalidPublicUrl && (
+                      <p className="text-[11px] text-red-400">
+                        Ingresa una URL válida que comience con https:// o http://
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShareModalOpen(false);
+                      void downloadActivePdf();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-amber-400" />
+                    <span>Descargar PDF para enviar</span>
+                  </button>
+                </div>
               )}
 
-              <div className="grid grid-cols-3 gap-2">
-                <a
-                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent('¡Hola! Te comparto esta publicación interactiva: ' + docTitle + ' - ' + (typeof window !== 'undefined' ? window.location.href : ''))}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5"
+              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-2 mb-4">
+                <input
+                  type="text"
+                  readOnly
+                  value={canonicalShareUrl}
+                  placeholder={
+                    isLocalOnly
+                      ? 'Pega arriba un enlace HTTPS para generar el link compartible'
+                      : ''
+                  }
+                  aria-label="Enlace de la publicación"
+                  className="bg-transparent text-xs text-zinc-300 flex-1 px-2 outline-none font-mono"
+                />
+                <button
+                  type="button"
+                  disabled={!hasShareableUrl}
+                  onClick={() => {
+                    if (!canonicalShareUrl) return;
+                    navigator.clipboard.writeText(canonicalShareUrl);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap cursor-pointer"
                 >
-                  <span className="text-emerald-400 font-bold">W</span> WhatsApp
-                </a>
-                <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent('Explora esta publicación digital: ' + docTitle)}&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5"
+                  {copied ? <Check className="w-3.5 h-3.5" /> : null}
+                  <span>{copied ? '¡Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <div className="space-y-2 mb-5">
+                {typeof navigator !== 'undefined' &&
+                  typeof navigator.share === 'function' &&
+                  hasShareableUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator
+                          .share({
+                            title: docTitle,
+                            text: 'Explora esta publicación interactiva',
+                            url: canonicalShareUrl,
+                          })
+                          .catch(() => {});
+                      }}
+                      className="w-full px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4 text-amber-400" />
+                      <span>Compartir mediante aplicaciones del dispositivo...</span>
+                    </button>
+                  )}
+
+                <div className="grid grid-cols-3 gap-2">
+                  <a
+                    href={
+                      hasShareableUrl
+                        ? `https://api.whatsapp.com/send?text=${encodeURIComponent('¡Hola! Te comparto esta publicación interactiva: ' + docTitle + ' - ' + canonicalShareUrl)}`
+                        : '#'
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-disabled={!hasShareableUrl}
+                    onClick={(e) => {
+                      if (!hasShareableUrl) e.preventDefault();
+                    }}
+                    className={`px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5 ${!hasShareableUrl ? 'opacity-40 pointer-events-none' : ''}`}
+                  >
+                    <span className="text-emerald-400 font-bold">W</span> WhatsApp
+                  </a>
+                  <a
+                    href={
+                      hasShareableUrl
+                        ? `https://twitter.com/intent/tweet?text=${encodeURIComponent('Explora esta publicación digital: ' + docTitle)}&url=${encodeURIComponent(canonicalShareUrl)}`
+                        : '#'
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-disabled={!hasShareableUrl}
+                    onClick={(e) => {
+                      if (!hasShareableUrl) e.preventDefault();
+                    }}
+                    className={`px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5 ${!hasShareableUrl ? 'opacity-40 pointer-events-none' : ''}`}
+                  >
+                    <span className="text-sky-400 font-bold">X</span> Twitter
+                  </a>
+                  <a
+                    href={
+                      hasShareableUrl
+                        ? `mailto:?subject=${encodeURIComponent('Publicación: ' + docTitle)}&body=${encodeURIComponent('Hola,\n\nTe comparto este enlace para leer la publicación interactiva:\n\n' + canonicalShareUrl)}`
+                        : '#'
+                    }
+                    aria-disabled={!hasShareableUrl}
+                    onClick={(e) => {
+                      if (!hasShareableUrl) e.preventDefault();
+                    }}
+                    className={`px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5 ${!hasShareableUrl ? 'opacity-40 pointer-events-none' : ''}`}
+                  >
+                    <span className="text-amber-400 font-bold">@</span> Correo
+                  </a>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShareModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition cursor-pointer"
                 >
-                  <span className="text-sky-400 font-bold">X</span> Twitter
-                </a>
-                <a
-                  href={`mailto:?subject=${encodeURIComponent('Publicación: ' + docTitle)}&body=${encodeURIComponent('Hola,\n\nTe comparto este enlace para leer la publicación interactiva:\n\n' + (typeof window !== 'undefined' ? window.location.href : ''))}`}
-                  className="px-3 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition flex items-center justify-center gap-1.5"
-                >
-                  <span className="text-amber-400 font-bold">@</span> Correo
-                </a>
+                  Cerrar
+                </button>
               </div>
             </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShareModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition cursor-pointer"
-              >
-                Cerrar
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Diálogo de preparación para impresión */}
       {isPreparingPrint && (
