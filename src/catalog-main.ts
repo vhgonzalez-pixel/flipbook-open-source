@@ -475,6 +475,9 @@ function getCatalogPublications(): CatalogItem[] {
 
 function buildViewerUrl(item: CatalogItem): string {
   if ('isLocal' in item && item.isLocal && item.id) {
+    if (item.sharedId) {
+      return `visor.html?share=${encodeURIComponent(item.sharedId)}`;
+    }
     const params = new URLSearchParams({
       local: item.id,
       title: item.titulo || item.fileName || 'Publicación local',
@@ -1404,24 +1407,32 @@ catalogPdfUploadEl?.addEventListener('change', async (e) => {
   try {
     const buffer = await file.arrayBuffer();
     const saved = await saveLocalPdfToLibrary(file, buffer);
-    if (saved && saved.id && !saved.sharedId && currentUser && isFirebaseReady() && buffer.byteLength <= MAX_SHARED_PDF_BYTES) {
-      try {
-        const shareId = await publishPdfBytesToCloudShare({
-          titulo: saved.titulo,
-          bytes: new Uint8Array(buffer),
-        });
-        saved.sharedId = shareId;
-        await updateLocalSharedId(saved.id, shareId);
-      } catch {
-        // Si falla la publicación automática en segundo plano, queda disponible localmente y se puede reintentar desde Compartir
+    let publishWarning = '';
+    if (saved && saved.id && !saved.sharedId && currentUser && isFirebaseReady()) {
+      if (buffer.byteLength <= MAX_SHARED_PDF_BYTES) {
+        try {
+          const shareId = await publishPdfBytesToCloudShare({
+            titulo: saved.titulo,
+            bytes: new Uint8Array(buffer),
+          });
+          saved.sharedId = shareId;
+          await updateLocalSharedId(saved.id, shareId);
+        } catch (pubErr) {
+          publishWarning =
+            pubErr instanceof Error && pubErr.message
+              ? ` (${pubErr.message})`
+              : ' (no se pudo publicar el enlace en la nube automáticamente; intenta desde el botón Compartir)';
+        }
+      } else {
+        publishWarning = ' (supera los 20 MB para enlace directo; usa Enlace PDF con HTTPS)';
       }
     }
     await syncCatalogWithIndexedDB();
     if (saved && saved.id) {
       showCatalogNotice({
         message: saved.sharedId
-          ? `«${saved.titulo}» guardado y listo para compartir con enlace de solo lectura.`
-          : `«${saved.titulo}» guardado en tu biblioteca local y disponible entre sesiones.`,
+          ? `«${saved.titulo}» guardado y publicado: listo para compartir con enlace de solo lectura.`
+          : `«${saved.titulo}» guardado solo en este navegador${publishWarning || '. Pulsa el ícono Compartir en la tarjeta para generar el enlace público'}.`,
         openHref: saved.sharedId
           ? `visor.html?share=${encodeURIComponent(saved.sharedId)}`
           : `visor.html?local=${encodeURIComponent(saved.id)}`,

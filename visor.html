@@ -3054,7 +3054,7 @@
             }
 
             try {
-                let user = bridge.getCurrentUser();
+                let user = await bridge.waitForAuthReady();
                 if (!user) {
                     user = await bridge.signIn();
                     if (!user) {
@@ -3088,6 +3088,11 @@
                 if (activeLocalId) {
                     await updateLocalPdfMetadata(activeLocalId, { sharedId: nextShareId });
                 }
+                try {
+                    const nextParams = new URLSearchParams();
+                    nextParams.set('share', nextShareId);
+                    window.history.replaceState(null, '', `?${nextParams.toString()}`);
+                } catch {}
                 if (sharePublishProgress) sharePublishProgress.classList.add('hidden');
                 syncShareModalState();
             } catch (err) {
@@ -3118,12 +3123,16 @@
             }
 
             const bridge = await waitForCloudShareBridge();
+            const authedUser = bridge ? await bridge.waitForAuthReady() : null;
             if (!activeShareId && activeLocalId) {
                 const localRec = await getLocalPublicationById(activeLocalId);
                 if (localRec && localRec.sharedId) {
                     const stillExists = bridge ? await bridge.verifyShareExists(localRec.sharedId) : true;
                     if (stillExists) {
                         activeShareId = localRec.sharedId;
+                        try {
+                            window.history.replaceState(null, '', `?share=${encodeURIComponent(localRec.sharedId)}`);
+                        } catch {}
                     } else {
                         await updateLocalPdfMetadata(activeLocalId, { sharedId: null });
                     }
@@ -3134,7 +3143,7 @@
             if (shareModal) shareModal.classList.remove('hidden');
 
             // Si ya inició sesión con Google, generar automáticamente el enlace de lectura al abrir Compartir
-            if (!activeShareId && isViewingLocalPdf() && bridge && bridge.getCurrentUser()) {
+            if (!activeShareId && isViewingLocalPdf() && bridge && authedUser) {
                 void publishCurrentLocalPdfToShare();
             }
         }
@@ -3369,18 +3378,47 @@
                 }
                 activeObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }));
                 const nextLocalId = saved ? saved.id : null;
-                const nextShareId = saved && saved.sharedId ? saved.sharedId : null;
+                let nextShareId = saved && saved.sharedId ? saved.sharedId : null;
                 const params = new URLSearchParams(window.location.search);
                 params.delete('doc');
                 params.delete('share');
                 params.set('title', file.name);
-                if (nextLocalId) {
-                    params.set('local', nextLocalId);
+                if (nextShareId) {
+                    window.history.replaceState(null, '', `?share=${encodeURIComponent(nextShareId)}`);
                 } else {
-                    params.delete('local');
+                    if (nextLocalId) {
+                        params.set('local', nextLocalId);
+                    } else {
+                        params.delete('local');
+                    }
+                    window.history.replaceState(null, '', `?${params.toString()}`);
                 }
-                window.history.replaceState(null, '', `?${params.toString()}`);
                 await loadPDFAndInitFlipbook(activeObjectUrl, file.name, { localId: nextLocalId, shareId: nextShareId });
+                // Si el usuario ya inició sesión con Google, publicar en segundo plano para que cualquier enlace que comparta funcione al instante
+                if (!nextShareId && nextLocalId) {
+                    void (async () => {
+                        try {
+                            const bridge = await waitForCloudShareBridge();
+                            if (!bridge || !bridge.isReady()) return;
+                            const user = await bridge.waitForAuthReady();
+                            if (!user || buffer.byteLength > bridge.maxBytes) return;
+                            const publishedId = await bridge.publishPdfBytes({
+                                titulo: (saved && saved.titulo) || file.name,
+                                bytes: new Uint8Array(buffer)
+                            });
+                            if (activeLocalId === nextLocalId) {
+                                activeShareId = publishedId;
+                                await updateLocalPdfMetadata(nextLocalId, { sharedId: publishedId });
+                                window.history.replaceState(null, '', `?share=${encodeURIComponent(publishedId)}`);
+                                if (shareModal && !shareModal.classList.contains('hidden')) {
+                                    syncShareModalState();
+                                }
+                            }
+                        } catch {
+                            // Si falla en segundo plano, queda disponible al pulsar Compartir
+                        }
+                    })();
+                }
             } catch (err) {
                 console.error('Error guardando PDF local en biblioteca:', err);
                 if (activeObjectUrl) {
@@ -3538,7 +3576,9 @@
                     } catch {
                         // Ignorar
                     }
-                    if (!requestedLocalId) {
+                    if (localRecord.sharedId) {
+                        window.history.replaceState(null, '', `?share=${encodeURIComponent(localRecord.sharedId)}`);
+                    } else if (!requestedLocalId) {
                         const params = new URLSearchParams(window.location.search);
                         params.set('local', localRecord.id);
                         params.set('title', localRecord.fileName);

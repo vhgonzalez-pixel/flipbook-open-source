@@ -1394,6 +1394,9 @@ export default function App() {
       if (activeLocalIdRef.current) {
         await updateLocalPdfMetadata(activeLocalIdRef.current, { sharedId: nextShareId });
       }
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', `?share=${encodeURIComponent(nextShareId)}`);
+      }
       setSharePublishProgress(null);
     } catch (err) {
       setSharePublishProgress(null);

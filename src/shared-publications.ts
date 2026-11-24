@@ -24,6 +24,24 @@ export type LoadedSharedPublication =
   | { kind: 'url'; shareId: string; titulo: string; pdfUrl: string }
   | { kind: 'bytes'; shareId: string; titulo: string; bytes: Uint8Array };
 
+function truncateUtf8(input: string, maxBytes: number): string {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) return '';
+  if (typeof TextEncoder === 'undefined') {
+    return trimmed.slice(0, maxBytes);
+  }
+  const encoder = new TextEncoder();
+  let result = '';
+  let byteCount = 0;
+  for (const ch of trimmed) {
+    const chBytes = encoder.encode(ch).length;
+    if (byteCount + chBytes > maxBytes) break;
+    result += ch;
+    byteCount += chBytes;
+  }
+  return result.trim();
+}
+
 function generateShareId(): string {
   const randomBytes = new Uint8Array(9);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
@@ -106,7 +124,7 @@ export async function publishPdfBytesToCloudShare(params: {
     throw new Error('El archivo excede el número máximo de fragmentos permitidos.');
   }
 
-  const cleanTitle = (params.titulo || 'Publicación PDF').trim().slice(0, 140) || 'Publicación PDF';
+  const cleanTitle = truncateUtf8(params.titulo || 'Publicación PDF', 140) || 'Publicación PDF';
   const shareId = generateShareId();
   const parentPath = `sharedPublications/${shareId}`;
 

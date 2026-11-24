@@ -1,4 +1,5 @@
 import {
+  auth,
   handleRedirectResult,
   isFirebaseReady,
   signInIndividualUser,
@@ -15,6 +16,7 @@ export interface VisorCloudShareBridge {
   isReady: () => boolean;
   maxBytes: number;
   getCurrentUser: () => { uid: string; email: string | null; displayName: string | null } | null;
+  waitForAuthReady: () => Promise<{ uid: string; email: string | null; displayName: string | null } | null>;
   subscribeAuth: (
     cb: (user: { uid: string; email: string | null; displayName: string | null } | null) => void
   ) => () => void;
@@ -61,6 +63,24 @@ const bridge: VisorCloudShareBridge = {
   isReady: () => isFirebaseReady(),
   maxBytes: MAX_SHARED_PDF_BYTES,
   getCurrentUser: () => latestUser,
+  waitForAuthReady: async () => {
+    if (!isFirebaseReady()) return null;
+    try {
+      if (typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+    } catch {
+      // Ignorar
+    }
+    if (auth.currentUser) {
+      latestUser = {
+        uid: auth.currentUser.uid,
+        email: auth.currentUser.email,
+        displayName: auth.currentUser.displayName,
+      };
+    }
+    return latestUser;
+  },
   subscribeAuth: (cb) => {
     authListeners.add(cb);
     cb(latestUser);
